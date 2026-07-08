@@ -1,0 +1,22 @@
+{
+  "name": "Laravel Forge",
+  "slug": "forge",
+  "logo": "logo.svg",
+  "status": "beta",
+  "statusNote": "Currently in early testing. Some features may not work as expected on all Forge instances.",
+  "description": "Deploy to servers managed by Laravel Forge. Perfect for Laravel applications with built-in Composer, queue, and SSL support.",
+  "features": [
+    "Site Management",
+    "SSL Certificates (Let's Encrypt)",
+    "Database Management",
+    "Queue Workers",
+    "Git Deployment",
+    "Daemon Commands"
+  ],
+  "config": {
+    "provider": "forge",
+    "api_token": "${FORGE_API_TOKEN}",
+    "server_id": "789012"
+  },
+  "install": "composer global require laravel/forge-sdk"
+}
