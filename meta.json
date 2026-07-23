@@ -2,6 +2,7 @@
   "name": "Laravel Forge",
   "slug": "forge",
   "logo": "logo.svg",
+  "darkLogo": "logo-dark.svg",
   "status": "beta",
   "statusNote": "Currently in early testing. Some features may not work as expected on all Forge instances.",
   "description": "Deploy to servers managed by Laravel Forge. Perfect for Laravel applications with built-in Composer, queue, and SSL support.",
