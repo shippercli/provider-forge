@@ -18,7 +18,7 @@
   "config": {
     "provider": "forge",
     "api_token": "${FORGE_API_TOKEN}",
-    "server_id": "789012"
+    "server_id": 1337
   },
   "install": "composer require shippercli/provider-forge"
 }
