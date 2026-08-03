@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace ShipperCli\ProviderForge;
 
 use ShipperCli\Contracts\DeploymentProviderInterface;
-use ShipperCli\Contracts\ShipperPluginInterface;
+use ShipperCli\Contracts\ProviderCapabilitiesInterface;
 
-final class ForgeProvider implements DeploymentProviderInterface
+final class ForgeProvider implements DeploymentProviderInterface, ProviderCapabilitiesInterface
 {
     /** @var array<string, mixed> */
     private readonly array $config;
@@ -23,6 +23,23 @@ final class ForgeProvider implements DeploymentProviderInterface
     public function getName(): string
     {
         return 'forge';
+    }
+
+    public function capabilities(): array
+    {
+        return [
+            'app_deploy' => ['state' => 'partial', 'limitations' => ['Deployment execution is not implemented yet.']],
+            'server_lifecycle' => ['state' => 'unsupported'],
+            'domain_management' => ['state' => 'partial'],
+            'ssl' => ['state' => 'partial'],
+            'databases' => ['state' => 'partial'],
+            'profiles' => ['state' => 'supported'],
+            'background_workloads' => ['state' => 'unsupported'],
+            'env' => ['state' => 'unsupported'],
+            'observability' => ['state' => 'unsupported'],
+            'rollback' => ['state' => 'unsupported'],
+            'previews' => ['state' => 'unsupported'],
+        ];
     }
 
     public function validate(object $project, object $profile): array

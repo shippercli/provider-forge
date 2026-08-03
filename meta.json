@@ -7,6 +7,7 @@
   "statusNote": "Currently in early testing. Some features may not work as expected on all Forge instances.",
   "description": "Deploy to servers managed by Laravel Forge. Perfect for Laravel applications with built-in Composer, queue, and SSL support.",
   "features": [
+    "Application Deployment",
     "Site Management",
     "SSL Certificates (Let's Encrypt)",
     "Database Management",
@@ -19,5 +20,5 @@
     "api_token": "${FORGE_API_TOKEN}",
     "server_id": "789012"
   },
-  "install": "composer global require laravel/forge-sdk"
+  "install": "composer require shippercli/provider-forge"
 }

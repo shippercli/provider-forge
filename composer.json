@@ -11,9 +11,26 @@
             "ShipperCli\\ProviderForge\\": "src/"
         }
     },
+    "autoload-dev": {
+        "psr-4": {
+            "ShipperCli\\ProviderForge\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "php vendor/bin/pest --no-coverage"
+    },
     "extra": {
         "shipper-plugin": "ShipperCli\\ProviderForge\\ForgePlugin"
     },
     "minimum-stability": "stable",
-    "prefer-stable": true
+    "prefer-stable": true,
+    "require-dev": {
+        "shippercli/contracts": "^1.1",
+        "pestphp/pest": "^3.8"
+    },
+    "config": {
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        }
+    }
 }
