@@ -90,7 +90,7 @@ final class ForgeProvider implements DeploymentProviderInterface, ProviderCapabi
             }
         }
 
-        $actions[] = 'Deploy site via Forge API';
+        $actions[] = 'Deploy site via Forge API when deployment execution is implemented';
 
         return [
             'provider' => $this->getName(),
@@ -100,18 +100,22 @@ final class ForgeProvider implements DeploymentProviderInterface, ProviderCapabi
             'server_id' => $serverId,
             'domain' => $domain,
             'actions' => $actions,
-            'note' => 'This will create a deployment on Forge server '.$serverId,
+            'note' => 'This describes the intended Forge deployment; execution is not implemented.',
         ];
     }
 
     public function apply(object $project, object $profile): bool
     {
-        return true;
+        $this->lastError = 'Forge apply is not implemented';
+
+        return false;
     }
 
     public function destroy(object $project, object $profile): bool
     {
-        return true;
+        $this->lastError = 'Forge destroy is not implemented';
+
+        return false;
     }
 
     public function getLastError(): string
