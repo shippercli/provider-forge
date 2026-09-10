@@ -4,6 +4,11 @@
 
 Laravel Forge provider plugin for Shipper CLI.
 
+> **Status: partial.** The provider is discoverable and validates Forge
+> configuration, but deployment mutations are deliberately unsupported until
+> Forge API execution is implemented. `apply` and `destroy` return an explicit
+> error rather than reporting a successful deployment.
+
 ## Installation
 
 ```bash

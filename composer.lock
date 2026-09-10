@@ -4,8 +4,43 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "3273fbabe08c26e4d2b71c40baffba10",
-    "packages": [],
+    "content-hash": "1251a88e544365b5bad4c6240fcd333a",
+    "packages": [
+        {
+            "name": "shippercli/contracts",
+            "version": "v1.1.0",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/shippercli/contracts.git",
+                "reference": "a09d516da61e74461fdce1ef57ddc4c2269b87d6"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/shippercli/contracts/zipball/a09d516da61e74461fdce1ef57ddc4c2269b87d6",
+                "reference": "a09d516da61e74461fdce1ef57ddc4c2269b87d6",
+                "shasum": ""
+            },
+            "require": {
+                "php": "^8.3"
+            },
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "ShipperCli\\Contracts\\": "src/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "description": "Contracts and interfaces for Shipper CLI providers",
+            "support": {
+                "issues": "https://github.com/shippercli/contracts/issues",
+                "source": "https://github.com/shippercli/contracts/tree/v1.1.0"
+            },
+            "time": "2026-08-03T12:13:29+00:00"
+        }
+    ],
     "packages-dev": [
         {
             "name": "brianium/paratest",
@@ -2885,40 +2920,6 @@
                 }
             ],
             "time": "2024-10-09T05:16:32+00:00"
-        },
-        {
-            "name": "shippercli/contracts",
-            "version": "v1.1.0",
-            "source": {
-                "type": "git",
-                "url": "https://github.com/shippercli/contracts.git",
-                "reference": "a09d516da61e74461fdce1ef57ddc4c2269b87d6"
-            },
-            "dist": {
-                "type": "zip",
-                "url": "https://api.github.com/repos/shippercli/contracts/zipball/a09d516da61e74461fdce1ef57ddc4c2269b87d6",
-                "reference": "a09d516da61e74461fdce1ef57ddc4c2269b87d6",
-                "shasum": ""
-            },
-            "require": {
-                "php": "^8.3"
-            },
-            "type": "library",
-            "autoload": {
-                "psr-4": {
-                    "ShipperCli\\Contracts\\": "src/"
-                }
-            },
-            "notification-url": "https://packagist.org/downloads/",
-            "license": [
-                "MIT"
-            ],
-            "description": "Contracts and interfaces for Shipper CLI providers",
-            "support": {
-                "issues": "https://github.com/shippercli/contracts/issues",
-                "source": "https://github.com/shippercli/contracts/tree/v1.1.0"
-            },
-            "time": "2026-08-03T12:13:29+00:00"
         },
         {
             "name": "staabm/side-effects-detector",
