@@ -5,6 +5,7 @@
     "license": "MIT",
     "require": {
         "php": "^8.3",
+        "laravel/forge-sdk": "^4.0",
         "shippercli/contracts": "^1.2"
     },
     "autoload": {
