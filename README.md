@@ -4,12 +4,14 @@
 
 Laravel Forge provider plugin for Shipper CLI.
 
-> **Status: partial.** Site creation and deployment use the current Forge API
-> v2 through an injectable client. The site source must be configured in Forge
-> because API v2 removed Git repository mutation endpoints. Destruction is
-> ownership-safe and refuses to delete a site unless its `shipper-managed` tag
-> is present. Databases, server lifecycle, rollback, and observability remain
-> unsupported.
+> **Status: capability-aware.** Site creation and deployment use the current
+> Forge API v2 through an injectable client. The site source must be configured
+> in Forge because API v2 removed Git repository mutation endpoints. Apply now
+> provisions configured databases, environment variables, queue workers,
+> scheduled jobs, and certificates when those resources are present in the
+> project configuration. Destruction remains ownership-safe and refuses to
+> delete a site unless its `shipper-managed` tag is present. Server lifecycle
+> and deployment rollback are not exposed by the Forge API v2 contract.
 
 ## Installation
 
