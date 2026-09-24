@@ -4,10 +4,14 @@
 
 Laravel Forge provider plugin for Shipper CLI.
 
-> **Status: partial.** The provider is discoverable and validates Forge
-> configuration, but deployment mutations are deliberately unsupported until
-> Forge API execution is implemented. `apply` and `destroy` return an explicit
-> error rather than reporting a successful deployment.
+> **Status: capability-aware.** Site creation and deployment use the current
+> Forge API v2 through an injectable client. The site source must be configured
+> in Forge because API v2 removed Git repository mutation endpoints. Apply now
+> provisions configured databases, environment variables, queue workers,
+> scheduled jobs, and certificates when those resources are present in the
+> project configuration. Destruction remains ownership-safe and refuses to
+> delete a site unless its `shipper-managed` tag is present. Server lifecycle
+> and deployment rollback are not exposed by the Forge API v2 contract.
 
 ## Installation
 
@@ -19,7 +23,11 @@ composer global require shippercli/provider-forge
 
 - PHP ^8.3
 - Shipper CLI
-- Laravel Forge account
+- Laravel Forge account with an API v2 organization slug
+
+Configure `api_token`, `organization_slug`, and `server_id`, plus
+`ownership_tag`. The default ownership tag is `shipper-managed`; do not remove
+it from a Shipper-managed site if cleanup is required.
 
 ## License
 
