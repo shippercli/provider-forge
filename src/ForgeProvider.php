@@ -124,7 +124,7 @@ final class ForgeProvider implements DeploymentProviderInterface, ProviderCapabi
             'server_id' => $serverId,
             'domain' => $domain,
             'actions' => $actions,
-            'note' => 'Forge deployment is executed through the configured API client.',
+            'note' => 'Forge API v2 deploys the source already configured on the Forge site; Shipper does not mutate repository or branch settings.',
         ];
     }
 

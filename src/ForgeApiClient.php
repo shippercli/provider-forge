@@ -27,10 +27,15 @@ final class ForgeApiClient implements ForgeCapabilitiesClientInterface
 
     public function createSite(string $serverId, array $payload): array
     {
-        $site = $this->forge->createSite($this->organizationSlug, (int) $serverId, [
+        $sitePayload = [
             'domain' => (string) ($payload['domain'] ?? ''),
             'type' => 'php',
-        ]);
+        ];
+        if (isset($payload['tags']) && is_array($payload['tags'])) {
+            $sitePayload['tags'] = array_values($payload['tags']);
+        }
+
+        $site = $this->forge->createSite($this->organizationSlug, (int) $serverId, $sitePayload);
         return $this->siteData($site);
     }
 

@@ -37,6 +37,7 @@ it('creates and deploys a site through the client', function () {
 
     expect($provider->apply($project, $profile))->toBeTrue()
         ->and($client->calls[1][0])->toBe('createSite')
+        ->and($client->calls[1][2]['tags'])->toBe(['shipper-managed'])
         ->and($client->calls[2][0])->toBe('deploy');
 });
 
