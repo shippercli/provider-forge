@@ -42,7 +42,7 @@ final class ForgeProvider implements DeploymentProviderInterface, ProviderCapabi
             'env' => ['state' => 'supported'],
             'observability' => ['state' => 'supported'],
             'rollback' => ['state' => 'unsupported'],
-            'previews' => ['state' => 'unsupported'],
+            'previews' => ['state' => 'supported', 'limitations' => ['Preview cleanup requires an explicit destroy operation and a Shipper ownership tag.']],
         ];
     }
 

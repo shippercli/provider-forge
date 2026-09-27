@@ -14,7 +14,8 @@ it('publishes the current forge capability states', function () {
     $capabilities = (new ForgeProvider())->capabilities();
 
     expect($capabilities['app_deploy']['state'])->toBe('partial')
-        ->and($capabilities['server_lifecycle']['state'])->toBe('unsupported')
+        ->and($capabilities['server_lifecycle']['state'])->toBe('supported')
+        ->and($capabilities['previews']['state'])->toBe('supported')
         ->and($capabilities['profiles']['state'])->toBe('supported');
 });
 

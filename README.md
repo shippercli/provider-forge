@@ -15,6 +15,9 @@ Laravel Forge provider plugin for Shipper CLI.
 > servers carrying the `shipper-managed-server` ownership tag. Deployment
 > rollback remains outside this provider contract.
 
+Profile-specific preview sites are supported when the site uses the
+`shipper-managed` tag; cleanup is explicit through `destroy`.
+
 ## Installation
 
 ```bash
