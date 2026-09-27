@@ -17,6 +17,10 @@ interface ForgeCapabilitiesClientInterface extends ForgeClientInterface
     /** @param array<string, string> $variables */
     public function updateEnvironment(string $serverId, string $siteId, array $variables): void;
 
+    public function updatePhpVersion(string $serverId, string $siteId, string $version): void;
+
+    public function updateNginxConfiguration(string $serverId, string $siteId, string $content): void;
+
     /** @return list<array<string, mixed>> */
     public function domains(string $serverId, string $siteId): array;
 

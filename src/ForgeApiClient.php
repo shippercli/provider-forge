@@ -74,6 +74,29 @@ final class ForgeApiClient implements ForgeCapabilitiesClientInterface
         );
     }
 
+    public function updatePhpVersion(string $serverId, string $siteId, string $version): void
+    {
+        $normalized = str_starts_with(strtolower($version), 'php')
+            ? strtolower($version)
+            : 'php'.str_replace('.', '', $version);
+        $this->forge->updateSitePhp(
+            $this->organizationSlug,
+            (int) $serverId,
+            (int) $siteId,
+            ['version' => $normalized],
+        );
+    }
+
+    public function updateNginxConfiguration(string $serverId, string $siteId, string $content): void
+    {
+        $this->forge->updateSiteNginx(
+            $this->organizationSlug,
+            (int) $serverId,
+            (int) $siteId,
+            $content,
+        );
+    }
+
     public function domains(string $serverId, string $siteId): array
     {
         return $this->resources($this->forge->domains(

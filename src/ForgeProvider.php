@@ -114,6 +114,13 @@ final class ForgeProvider implements DeploymentProviderInterface, ProviderCapabi
             $actions[] = 'Create or reuse a Let\'s Encrypt certificate';
         }
 
+        if (method_exists($project, 'phpVersion') && $project->phpVersion() !== '') {
+            $actions[] = 'Set site PHP version: '.$project->phpVersion();
+        }
+        if (method_exists($project, 'nginxConfig') && $project->nginxConfig() !== '') {
+            $actions[] = 'Update site NGINX configuration';
+        }
+
         $actions[] = 'Deploy site via Forge API';
 
         return [
@@ -263,7 +270,9 @@ final class ForgeProvider implements DeploymentProviderInterface, ProviderCapabi
             || method_exists($profile, 'environment')
             || method_exists($project, 'queues')
             || method_exists($project, 'cron')
-            || method_exists($project, 'ssl');
+            || method_exists($project, 'ssl')
+            || method_exists($project, 'phpVersion')
+            || method_exists($project, 'nginxConfig');
         if (! $hasCapabilities) {
             return;
         }
@@ -273,6 +282,30 @@ final class ForgeProvider implements DeploymentProviderInterface, ProviderCapabi
         $this->applyQueues($client, $project, $serverId);
         $this->applyCron($client, $project, $serverId);
         $this->applySsl($client, $project, $serverId, $siteId, $domain);
+        $this->applyPhpVersion($client, $project, $serverId, $siteId);
+        $this->applyNginxConfiguration($client, $project, $serverId, $siteId);
+    }
+
+    private function applyPhpVersion(ForgeCapabilitiesClientInterface $client, object $project, string $serverId, string $siteId): void
+    {
+        if (! method_exists($project, 'phpVersion')) {
+            return;
+        }
+        $version = $project->phpVersion();
+        if (is_string($version) && $version !== '') {
+            $client->updatePhpVersion($serverId, $siteId, $version);
+        }
+    }
+
+    private function applyNginxConfiguration(ForgeCapabilitiesClientInterface $client, object $project, string $serverId, string $siteId): void
+    {
+        if (! method_exists($project, 'nginxConfig')) {
+            return;
+        }
+        $configuration = $project->nginxConfig();
+        if (is_string($configuration) && $configuration !== '') {
+            $client->updateNginxConfiguration($serverId, $siteId, $configuration);
+        }
     }
 
     private function applyDatabases(ForgeCapabilitiesClientInterface $client, object $project): void

@@ -66,6 +66,8 @@ it('applies configured Forge capabilities through the extended client', function
         public function createDatabase(string $serverId, array $payload): array { $this->calls[] = ['database', $payload]; return ['id' => 20, 'name' => $payload['name']]; }
         public function deleteDatabase(string $serverId, string $databaseId): void {}
         public function updateEnvironment(string $serverId, string $siteId, array $variables): void { $this->calls[] = ['environment', $variables]; }
+        public function updatePhpVersion(string $serverId, string $siteId, string $version): void { $this->calls[] = ['php', $version]; }
+        public function updateNginxConfiguration(string $serverId, string $siteId, string $content): void { $this->calls[] = ['nginx', $content]; }
         public function domains(string $serverId, string $siteId): array { return [['id' => 30, 'name' => 'example.test']]; }
         public function createDomain(string $serverId, string $siteId, array $payload): array { return ['id' => 30, 'name' => $payload['name']]; }
         public function createCertificate(string $serverId, string $siteId, string $domainId, array $payload): void { $this->calls[] = ['certificate', $payload]; }
@@ -103,6 +105,8 @@ it('applies configured Forge capabilities through the extended client', function
             public function enabled(): bool { return true; }
             public function type(): string { return 'letsencrypt'; }
         }; }
+        public function phpVersion(): string { return '8.4'; }
+        public function nginxConfig(): string { return 'location / { try_files $uri $uri/ /index.php?$query_string; }'; }
     };
     $profile = new class {
         public function get(string $key): mixed { return $key === 'domain' ? 'example.test' : null; }
@@ -112,5 +116,5 @@ it('applies configured Forge capabilities through the extended client', function
     $provider = new ForgeProvider(['api_token' => 'token', 'server_id' => 7, 'organization_slug' => 'shipper'], $client);
 
     expect($provider->apply($project, $profile))->toBeTrue()
-        ->and(array_column($client->calls, 0))->toContain('database', 'environment', 'worker', 'cron', 'certificate', 'deploy');
+        ->and(array_column($client->calls, 0))->toContain('database', 'environment', 'worker', 'cron', 'certificate', 'php', 'nginx', 'deploy');
 });
