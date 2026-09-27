@@ -16,6 +16,8 @@ final class ForgeProvider implements DeploymentProviderInterface, ProviderCapabi
 
     private string $lastError = '';
 
+    private string $activeServerId = '';
+
     /** @param array<string, mixed> $config */
     public function __construct(array $config = [], private readonly ?ForgeClientInterface $client = null)
     {
@@ -31,7 +33,7 @@ final class ForgeProvider implements DeploymentProviderInterface, ProviderCapabi
     {
         return [
             'app_deploy' => ['state' => 'partial', 'limitations' => ['Forge API v2 can create and trigger a site, but repository installation must be configured in Forge because the v2 API removed Git mutation endpoints.']],
-            'server_lifecycle' => ['state' => 'unsupported'],
+            'server_lifecycle' => ['state' => 'supported', 'limitations' => ['Only servers created through the provider lifecycle spec are eligible for cleanup.']],
             'domain_management' => ['state' => 'supported'],
             'ssl' => ['state' => 'supported'],
             'databases' => ['state' => 'supported'],
@@ -52,8 +54,17 @@ final class ForgeProvider implements DeploymentProviderInterface, ProviderCapabi
             $errors[] = 'Forge API token is required';
         }
 
-        if (! isset($this->config['server_id']) || $this->config['server_id'] === '') {
+        if ((! isset($this->config['server_id']) || $this->config['server_id'] === '') && $this->serverSpec() === null) {
             $errors[] = 'Forge server ID is required';
+        }
+
+        if ($this->serverSpec() !== null) {
+            $server = $this->serverSpec();
+            foreach (['provider', 'credential_id', 'name', 'type', 'size', 'region'] as $key) {
+                if (! isset($server[$key]) || $server[$key] === '') {
+                    $errors[] = "Forge server configuration requires {$key}";
+                }
+            }
         }
 
         if (! isset($this->config['organization_slug']) || $this->config['organization_slug'] === '') {
@@ -78,7 +89,13 @@ final class ForgeProvider implements DeploymentProviderInterface, ProviderCapabi
         $profileName = method_exists($profile, 'name') ? $profile->name() : 'unknown';
         $branch = method_exists($profile, 'branch') ? $profile->branch() : 'main';
 
-        $actions = ["Create or find site for domain: {$domain}"];
+        $actions = [];
+        if ($this->serverSpec() !== null && ($this->config['server_id'] ?? '') === '') {
+            $actions[] = 'Create or reuse owned Forge server: '.($this->serverSpec()['name'] ?? '');
+        } else {
+            $actions[] = "Use Forge server: {$serverId}";
+        }
+        $actions[] = "Create or find site for domain: {$domain}";
 
         if (method_exists($project, 'databases')) {
             $databases = $project->databases();
@@ -128,7 +145,7 @@ final class ForgeProvider implements DeploymentProviderInterface, ProviderCapabi
             'project' => $projectName,
             'profile' => $profileName,
             'branch' => $branch,
-            'server_id' => $serverId,
+            'server_id' => $serverId !== '' ? $serverId : null,
             'domain' => $domain,
             'actions' => $actions,
             'note' => 'Forge deployment is executed through the configured API client.',
@@ -144,7 +161,7 @@ final class ForgeProvider implements DeploymentProviderInterface, ProviderCapabi
         }
 
         try {
-            $serverId = $this->getServerId();
+            $serverId = $this->ensureServer();
             $domain = (string) $this->profileValue($profile, 'domain');
             $site = $this->findSite($serverId, $domain);
             if ($site === null) {
@@ -175,7 +192,12 @@ final class ForgeProvider implements DeploymentProviderInterface, ProviderCapabi
             if (! is_string($domain) || $domain === '') {
                 throw new RuntimeException('Domain is required for Forge destroy');
             }
-            $site = $this->findSite($this->getServerId(), $domain);
+            $serverId = $this->getServerId();
+            if ($serverId === '' && $this->serverSpec() !== null) {
+                $this->cleanupManagedServer();
+                return true;
+            }
+            $site = $this->findSite($serverId, $domain);
             if ($site === null) {
                 $this->lastError = '';
                 return true;
@@ -187,7 +209,8 @@ final class ForgeProvider implements DeploymentProviderInterface, ProviderCapabi
             if ($siteId === null) {
                 throw new RuntimeException('Forge returned a site without an ID');
             }
-            $this->forgeClient()->deleteSite($this->getServerId(), $siteId);
+            $this->forgeClient()->deleteSite($serverId, $siteId);
+            $this->cleanupManagedServer();
             $this->lastError = '';
             return true;
         } catch (Throwable $exception) {
@@ -203,6 +226,9 @@ final class ForgeProvider implements DeploymentProviderInterface, ProviderCapabi
 
     public function getServerId(): string
     {
+        if ($this->activeServerId !== '') {
+            return $this->activeServerId;
+        }
         $serverId = $this->config['server_id'] ?? '';
         if (\is_string($serverId)) {
             return $serverId;
@@ -251,6 +277,83 @@ final class ForgeProvider implements DeploymentProviderInterface, ProviderCapabi
             (string) $this->config['organization_slug'],
             (string) $this->config['api_token'],
         );
+    }
+
+    /** @return array<string, mixed>|null */
+    private function serverSpec(): ?array
+    {
+        $server = $this->config['server'] ?? null;
+
+        return is_array($server) ? $server : null;
+    }
+
+    private function ownershipServerTag(): string
+    {
+        return 'shipper-managed-server';
+    }
+
+    private function ensureServer(): string
+    {
+        if ($this->getServerId() !== '') {
+            return $this->getServerId();
+        }
+        $spec = $this->serverSpec();
+        if ($spec === null) {
+            throw new RuntimeException('Forge server ID or server lifecycle configuration is required');
+        }
+
+        $client = $this->forgeClient();
+        $name = (string) $spec['name'];
+        foreach ($client->servers() as $server) {
+            if (($server['name'] ?? null) !== $name) {
+                continue;
+            }
+            if (! in_array($this->ownershipServerTag(), (array) ($server['tags'] ?? []), true)) {
+                throw new RuntimeException('Forge server with the configured name exists without Shipper ownership');
+            }
+            $id = $server['id'] ?? null;
+            if ($id === null) {
+                throw new RuntimeException('Forge returned an owned server without an ID');
+            }
+            $this->activeServerId = (string) $id;
+
+            return $this->activeServerId;
+        }
+
+        $payload = $spec;
+        unset($payload['cleanup']);
+        $payload['tags'] = array_values(array_unique([
+            ...(is_array($payload['tags'] ?? null) ? $payload['tags'] : []),
+            $this->ownershipServerTag(),
+        ]));
+        $created = $client->createServer($payload);
+        $id = $created['id'] ?? null;
+        if ($id === null) {
+            throw new RuntimeException('Forge returned a created server without an ID');
+        }
+        $this->activeServerId = (string) $id;
+
+        return $this->activeServerId;
+    }
+
+    private function cleanupManagedServer(): void
+    {
+        $spec = $this->serverSpec();
+        if ($spec === null || ($spec['cleanup'] ?? false) !== true) {
+            return;
+        }
+        $name = (string) ($spec['name'] ?? '');
+        foreach ($this->forgeClient()->servers() as $server) {
+            if (($server['name'] ?? null) !== $name
+                || ! in_array($this->ownershipServerTag(), (array) ($server['tags'] ?? []), true)) {
+                continue;
+            }
+            $id = $server['id'] ?? null;
+            if ($id !== null) {
+                $this->forgeClient()->deleteServer((string) $id);
+            }
+            return;
+        }
     }
 
     private function forgeCapabilitiesClient(): ForgeCapabilitiesClientInterface

@@ -11,8 +11,9 @@ Laravel Forge provider plugin for Shipper CLI.
 > scheduled jobs, certificates, PHP versions, and NGINX configuration when
 > those resources are present in the project configuration. Destruction remains
 > ownership-safe and refuses to delete a site unless its `shipper-managed` tag
-> is present. Server lifecycle and deployment rollback remain outside this
-> provider contract.
+> is present. Server lifecycle can create, reuse, and optionally clean up
+> servers carrying the `shipper-managed-server` ownership tag. Deployment
+> rollback remains outside this provider contract.
 
 ## Installation
 
@@ -26,9 +27,10 @@ composer global require shippercli/provider-forge
 - Shipper CLI
 - Laravel Forge account with an API v2 organization slug
 
-Configure `api_token`, `organization_slug`, and `server_id`, plus
-`ownership_tag`. The default ownership tag is `shipper-managed`; do not remove
-it from a Shipper-managed site if cleanup is required.
+Configure `api_token`, `organization_slug`, and either `server_id` or a
+`server` lifecycle map. Lifecycle-created servers receive the
+`shipper-managed-server` tag and are deleted only when `cleanup: true`; site
+cleanup still uses the `shipper-managed` tag.
 
 ## License
 

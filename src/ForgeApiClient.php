@@ -25,6 +25,21 @@ final class ForgeApiClient implements ForgeCapabilitiesClientInterface
         return $sites;
     }
 
+    public function servers(): array
+    {
+        return $this->resources($this->forge->servers($this->organizationSlug));
+    }
+
+    public function createServer(array $payload): array
+    {
+        return $this->resourceData($this->forge->createServer($this->organizationSlug, $payload));
+    }
+
+    public function deleteServer(string $serverId): void
+    {
+        $this->forge->deleteServer($this->organizationSlug, (int) $serverId);
+    }
+
     public function createSite(string $serverId, array $payload): array
     {
         $site = $this->forge->createSite($this->organizationSlug, (int) $serverId, [

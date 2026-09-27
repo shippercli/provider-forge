@@ -26,6 +26,9 @@ it('conforms to the shared capability manifest contract', function () {
 it('creates and deploys a site through the client', function () {
     $client = new class implements \ShipperCli\ProviderForge\ForgeClientInterface {
         public array $calls = [];
+        public function servers(): array { $this->calls[] = ['servers']; return []; }
+        public function createServer(array $payload): array { $this->calls[] = ['createServer', $payload]; return ['id' => 7]; }
+        public function deleteServer(string $serverId): void { $this->calls[] = ['deleteServer', $serverId]; }
         public function sites(string $serverId): array { $this->calls[] = ['sites', $serverId]; return []; }
         public function createSite(string $serverId, array $payload): array { $this->calls[] = ['createSite', $serverId, $payload]; return ['id' => 12, 'name' => 'example.test', 'tags' => ['shipper-managed']]; }
         public function deploy(string $serverId, string $siteId): void { $this->calls[] = ['deploy', $serverId, $siteId]; }
@@ -42,6 +45,9 @@ it('creates and deploys a site through the client', function () {
 
 it('refuses to destroy an unowned site', function () {
     $client = new class implements \ShipperCli\ProviderForge\ForgeClientInterface {
+        public function servers(): array { return []; }
+        public function createServer(array $payload): array { return []; }
+        public function deleteServer(string $serverId): void {}
         public function sites(string $serverId): array { return [['id' => 12, 'name' => 'example.test', 'tags' => []]]; }
         public function createSite(string $serverId, array $payload): array { return []; }
         public function deploy(string $serverId, string $siteId): void {}
@@ -54,10 +60,63 @@ it('refuses to destroy an unowned site', function () {
         ->and($provider->getLastError())->toContain('not owned');
 });
 
+it('creates an owned Forge server from lifecycle configuration before creating its site', function () {
+    $client = new class implements \ShipperCli\ProviderForge\ForgeClientInterface {
+        public array $calls = [];
+        public function servers(): array { $this->calls[] = ['servers']; return []; }
+        public function createServer(array $payload): array { $this->calls[] = ['createServer', $payload]; return ['id' => 99, 'name' => 'shipper-app', 'tags' => ['shipper-managed-server']]; }
+        public function deleteServer(string $serverId): void { $this->calls[] = ['deleteServer', $serverId]; }
+        public function sites(string $serverId): array { $this->calls[] = ['sites', $serverId]; return []; }
+        public function createSite(string $serverId, array $payload): array { $this->calls[] = ['createSite', $serverId, $payload]; return ['id' => 12, 'name' => 'example.test', 'tags' => ['shipper-managed']]; }
+        public function deploy(string $serverId, string $siteId): void { $this->calls[] = ['deploy', $serverId, $siteId]; }
+        public function deleteSite(string $serverId, string $siteId): void {}
+    };
+    $provider = new ForgeProvider([
+        'api_token' => 'token',
+        'organization_slug' => 'shipper',
+        'server' => [
+            'provider' => 'digital-ocean',
+            'credential_id' => 1,
+            'name' => 'shipper-app',
+            'type' => 'app',
+            'size' => '01',
+            'region' => 'ams2',
+            'cleanup' => true,
+        ],
+    ], $client);
+    $project = new class { public function get(string $key): mixed { return $key === 'repository' ? 'shippercli/example' : null; } };
+    $profile = new class { public function get(string $key): mixed { return ['domain' => 'example.test', 'branch' => 'main'][$key] ?? null; } };
+
+    expect($provider->apply($project, $profile))->toBeTrue()
+        ->and($client->calls[3][0])->toBe('createSite')
+        ->and($client->calls[3][1])->toBe('99')
+        ->and($client->calls[0][0])->toBe('servers');
+});
+
+it('deletes only an owned Forge lifecycle server when cleanup is enabled', function () {
+    $client = new class implements \ShipperCli\ProviderForge\ForgeClientInterface {
+        public array $calls = [];
+        public function servers(): array { $this->calls[] = ['servers']; return [['id' => 99, 'name' => 'shipper-app', 'tags' => ['shipper-managed-server']]]; }
+        public function createServer(array $payload): array { return []; }
+        public function deleteServer(string $serverId): void { $this->calls[] = ['deleteServer', $serverId]; }
+        public function sites(string $serverId): array { return []; }
+        public function createSite(string $serverId, array $payload): array { return []; }
+        public function deploy(string $serverId, string $siteId): void {}
+        public function deleteSite(string $serverId, string $siteId): void {}
+    };
+    $provider = new ForgeProvider(['api_token' => 'token', 'organization_slug' => 'shipper', 'server' => ['name' => 'shipper-app', 'cleanup' => true]], $client);
+
+    expect($provider->destroy(new stdClass(), new stdClass()))->toBeTrue()
+        ->and($client->calls)->toContain(['deleteServer', '99']);
+});
+
 it('applies configured Forge capabilities through the extended client', function () {
     $client = new class implements \ShipperCli\ProviderForge\ForgeCapabilitiesClientInterface {
         public array $calls = [];
 
+        public function servers(): array { return []; }
+        public function createServer(array $payload): array { return []; }
+        public function deleteServer(string $serverId): void {}
         public function sites(string $serverId): array { return []; }
         public function createSite(string $serverId, array $payload): array { return ['id' => 12, 'name' => 'example.test', 'tags' => ['shipper-managed']]; }
         public function deploy(string $serverId, string $siteId): void { $this->calls[] = ['deploy']; }

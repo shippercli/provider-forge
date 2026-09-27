@@ -7,6 +7,14 @@ namespace ShipperCli\ProviderForge;
 interface ForgeClientInterface
 {
     /** @return list<array<string, mixed>> */
+    public function servers(): array;
+
+    /** @param array<string, mixed> $payload @return array<string, mixed> */
+    public function createServer(array $payload): array;
+
+    public function deleteServer(string $serverId): void;
+
+    /** @return list<array<string, mixed>> */
     public function sites(string $serverId): array;
 
     /** @param array<string, mixed> $payload @return array<string, mixed> */
