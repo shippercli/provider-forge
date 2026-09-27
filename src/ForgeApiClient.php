@@ -202,7 +202,7 @@ final class ForgeApiClient implements ForgeCapabilitiesClientInterface
     private function resourceData(object $resource): array
     {
         $data = [];
-        foreach (['id', 'name', 'domain', 'type', 'status', 'command', 'user', 'frequency', 'cron', 'tags'] as $key) {
+        foreach (['id', 'name', 'domain', 'type', 'status', 'requestStatus', 'active', 'command', 'user', 'frequency', 'cron', 'tags'] as $key) {
             if (isset($resource->{$key})) {
                 $data[$key] = $resource->{$key};
             }

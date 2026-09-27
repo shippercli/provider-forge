@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace ShipperCli\ProviderForge;
 
 use RuntimeException;
+use Laravel\Forge\Exceptions\ValidationException;
 use ShipperCli\Contracts\DeploymentLogsProviderInterface;
 use ShipperCli\Contracts\DeploymentProviderInterface;
 use ShipperCli\Contracts\DeploymentStatusProviderInterface;
@@ -149,7 +150,9 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
             if ($site === null) {
                 $site = $this->forgeClient()->createSite($serverId, [
                     'domain' => $domain,
-                    'project_type' => 'php',
+                    'project_type' => method_exists($project, 'type')
+                        ? (string) $project->type()
+                        : (string) ($this->config['project_type'] ?? 'php'),
                     'tags' => [$this->ownershipTag()],
                 ]);
             } elseif (! $this->isOwnedSite($site)) {
@@ -164,7 +167,9 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
             $this->lastError = '';
             return true;
         } catch (Throwable $exception) {
-            $this->lastError = $exception->getMessage();
+            $this->lastError = $exception instanceof ValidationException
+                ? $exception->getMessage().' '.json_encode($exception->errors(), JSON_UNESCAPED_SLASHES)
+                : $exception->getMessage();
             return false;
         }
     }
