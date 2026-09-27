@@ -18,6 +18,9 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
 
     private string $lastError = '';
 
+    /** @var array<string, string> */
+    private array $generatedEnvironment = [];
+
     /** @param array<string, mixed> $config */
     public function __construct(array $config = [], private readonly ?ForgeClientInterface $client = null)
     {
@@ -132,6 +135,7 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
 
     public function apply(object $project, object $profile): bool
     {
+        $this->generatedEnvironment = [];
         $errors = $this->validate($project, $profile);
         if ($errors !== []) {
             $this->lastError = implode('; ', $errors);
@@ -304,6 +308,13 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
                 'password' => (string) ($this->config['database_password'] ?? bin2hex(random_bytes(16))),
             ];
             $client->createDatabase($this->getServerId(), $payload);
+            if ($this->generatedEnvironment === []) {
+                $this->generatedEnvironment = [
+                    'DB_DATABASE' => $name,
+                    'DB_USERNAME' => (string) $payload['user'],
+                    'DB_PASSWORD' => (string) $payload['password'],
+                ];
+            }
         }
     }
 
@@ -318,6 +329,7 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
                 }
             }
         }
+        $variables = [...$variables, ...$this->generatedEnvironment];
         if ($variables !== []) {
             $client->updateEnvironment($serverId, $siteId, $variables);
         }
