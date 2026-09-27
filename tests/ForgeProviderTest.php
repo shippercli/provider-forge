@@ -55,6 +55,46 @@ it('refuses to destroy an unowned site', function () {
         ->and($provider->getLastError())->toContain('not owned');
 });
 
+it('lists only owned sites for orphaned preview cleanup', function () {
+    $client = new class implements \ShipperCli\ProviderForge\ForgeClientInterface {
+        public function sites(string $serverId): array
+        {
+            return [
+                ['id' => 12, 'name' => 'preview-owned.test', 'tags' => ['shipper-managed']],
+                ['id' => 13, 'name' => 'production.test', 'tags' => []],
+            ];
+        }
+
+        public function createSite(string $serverId, array $payload): array { return []; }
+        public function deploy(string $serverId, string $siteId): void {}
+        public function deleteSite(string $serverId, string $siteId): void {}
+    };
+    $provider = new ForgeProvider(['api_token' => 'token', 'server_id' => 7, 'organization_slug' => 'shipper'], $client);
+
+    expect($provider->listSites(new stdClass(), new stdClass()))->toBe([
+        ['site_id' => 12, 'domain' => 'preview-owned.test'],
+    ]);
+});
+
+it('deletes only an owned site through orphaned preview cleanup', function () {
+    $client = new class implements \ShipperCli\ProviderForge\ForgeClientInterface {
+        public array $deleted = [];
+
+        public function sites(string $serverId): array
+        {
+            return [['id' => 12, 'name' => 'preview-owned.test', 'tags' => ['shipper-managed']]];
+        }
+
+        public function createSite(string $serverId, array $payload): array { return []; }
+        public function deploy(string $serverId, string $siteId): void {}
+        public function deleteSite(string $serverId, string $siteId): void { $this->deleted[] = [$serverId, $siteId]; }
+    };
+    $provider = new ForgeProvider(['api_token' => 'token', 'server_id' => 7, 'organization_slug' => 'shipper'], $client);
+
+    expect($provider->deleteSiteWithDatabases(new stdClass(), new stdClass(), 12))->toBeTrue()
+        ->and($client->deleted)->toBe([['7', '12']]);
+});
+
 it('applies configured Forge capabilities through the extended client', function () {
     $client = new class implements \ShipperCli\ProviderForge\ForgeCapabilitiesClientInterface {
         public array $calls = [];

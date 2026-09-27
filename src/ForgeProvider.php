@@ -46,7 +46,7 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
             'env' => ['state' => 'supported'],
             'observability' => ['state' => 'supported'],
             'rollback' => ['state' => 'unsupported'],
-            'previews' => ['state' => 'unsupported'],
+            'previews' => ['state' => 'partial', 'limitations' => ['Owned preview sites can be enumerated and removed, but Forge API v2 does not expose a safe database ownership association for automatic database cleanup.']],
         ];
     }
 
@@ -200,6 +200,50 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
             $this->lastError = $exception->getMessage();
             return false;
         }
+    }
+
+    /** @return array<int, array{site_id: int, domain: string}> */
+    public function listSites(object $project, object $profile): array
+    {
+        $sites = [];
+        foreach ($this->forgeClient()->sites($this->getServerId()) as $site) {
+            if (! $this->isOwnedSite($site)) {
+                continue;
+            }
+
+            $siteId = $this->siteId($site);
+            $domain = $site['name'] ?? ($site['domain'] ?? null);
+            if ($siteId === null || ! \is_string($domain) || $domain === '' || ! \ctype_digit($siteId)) {
+                continue;
+            }
+
+            $sites[] = ['site_id' => (int) $siteId, 'domain' => $domain];
+        }
+
+        return $sites;
+    }
+
+    public function deleteSiteWithDatabases(object $project, object $profile, int $siteId): bool
+    {
+        foreach ($this->forgeClient()->sites($this->getServerId()) as $site) {
+            if ($this->siteId($site) !== (string) $siteId) {
+                continue;
+            }
+            if (! $this->isOwnedSite($site)) {
+                $this->lastError = 'Forge site is not owned by Shipper; refusing to destroy it';
+
+                return false;
+            }
+
+            $this->forgeClient()->deleteSite($this->getServerId(), (string) $siteId);
+            $this->lastError = '';
+
+            return true;
+        }
+
+        $this->lastError = '';
+
+        return true;
     }
 
     public function getLastError(): string
