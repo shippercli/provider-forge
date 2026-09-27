@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace ShipperCli\ProviderForge;
 
 use RuntimeException;
+use ShipperCli\Contracts\DeploymentLogsProviderInterface;
 use ShipperCli\Contracts\DeploymentProviderInterface;
+use ShipperCli\Contracts\DeploymentStatusProviderInterface;
 use ShipperCli\Contracts\ProviderCapabilitiesInterface;
 use Throwable;
 
-final class ForgeProvider implements DeploymentProviderInterface, ProviderCapabilitiesInterface
+final class ForgeProvider implements DeploymentLogsProviderInterface, DeploymentProviderInterface, DeploymentStatusProviderInterface, ProviderCapabilitiesInterface
 {
     /** @var array<string, mixed> */
     private readonly array $config;
@@ -146,6 +148,8 @@ final class ForgeProvider implements DeploymentProviderInterface, ProviderCapabi
                     'project_type' => 'php',
                     'tags' => [$this->ownershipTag()],
                 ]);
+            } elseif (! $this->isOwnedSite($site)) {
+                throw new RuntimeException('Forge site exists but is not owned by Shipper; refusing to modify it');
             }
             $siteId = $this->siteId($site);
             if ($siteId === null) {
@@ -219,15 +223,18 @@ final class ForgeProvider implements DeploymentProviderInterface, ProviderCapabi
         return $this->forgeCapabilitiesClient()->status($this->getServerId(), $siteId);
     }
 
-    public function logs(object $project, object $profile): string
+    /** @return array<int, string> */
+    public function logs(object $project, object $profile, int $lines = 100): array
     {
         $site = $this->findSite($this->getServerId(), (string) $this->profileValue($profile, 'domain'));
         $siteId = $site === null ? null : $this->siteId($site);
         if ($siteId === null || ! $this->forgeClient() instanceof ForgeCapabilitiesClientInterface) {
-            return '';
+            return [];
         }
 
-        return $this->forgeCapabilitiesClient()->applicationLog($this->getServerId(), $siteId);
+        $log = $this->forgeCapabilitiesClient()->applicationLog($this->getServerId(), $siteId);
+
+        return array_slice(preg_split('/\R/', $log) ?: [], -max(1, $lines));
     }
 
     private function interpolateDatabaseName(string $name, string $projectName, string $profileName): string
@@ -268,14 +275,14 @@ final class ForgeProvider implements DeploymentProviderInterface, ProviderCapabi
             return;
         }
         $client = $this->forgeCapabilitiesClient();
-        $this->applyDatabases($client, $project);
+        $this->applyDatabases($client, $project, $profile);
         $this->applyEnvironment($client, $project, $profile, $serverId, $siteId);
         $this->applyQueues($client, $project, $serverId);
         $this->applyCron($client, $project, $serverId);
         $this->applySsl($client, $project, $serverId, $siteId, $domain);
     }
 
-    private function applyDatabases(ForgeCapabilitiesClientInterface $client, object $project): void
+    private function applyDatabases(ForgeCapabilitiesClientInterface $client, object $project, object $profile): void
     {
         if (! method_exists($project, 'databases')) {
             return;
@@ -286,7 +293,7 @@ final class ForgeProvider implements DeploymentProviderInterface, ProviderCapabi
             if (! method_exists($database, 'name')) {
                 continue;
             }
-            $name = $this->interpolateDatabaseName($database->name(), $this->projectName($project), '');
+            $name = $this->interpolateDatabaseName($database->name(), $this->projectName($project), $this->profileName($profile));
             if ($this->resourceByName($existing, $name) !== null) {
                 continue;
             }
@@ -381,6 +388,10 @@ final class ForgeProvider implements DeploymentProviderInterface, ProviderCapabi
         if (! is_int($domainId) && ! is_string($domainId)) {
             throw new RuntimeException('Forge returned a domain without an ID');
         }
+        $active = $client->activeCertificate($serverId, $siteId, (string) $domainId);
+        if (($active['active'] ?? false) === true || in_array($active['status'] ?? null, ['active', 'issued', 'installed'], true)) {
+            return;
+        }
         $client->createCertificate($serverId, $siteId, (string) $domainId, [
             'type' => $project->ssl()->type(),
         ]);
@@ -411,6 +422,11 @@ final class ForgeProvider implements DeploymentProviderInterface, ProviderCapabi
     private function projectName(object $project): string
     {
         return method_exists($project, 'name') ? $project->name() : 'project';
+    }
+
+    private function profileName(object $profile): string
+    {
+        return method_exists($profile, 'name') ? $profile->name() : 'profile';
     }
 
     private function profileValue(object $object, string $key): mixed

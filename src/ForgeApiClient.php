@@ -19,7 +19,7 @@ final class ForgeApiClient implements ForgeCapabilitiesClientInterface
     public function sites(string $serverId): array
     {
         $sites = [];
-        foreach ($this->forge->serverSites($this->organizationSlug, (int) $serverId) as $site) {
+        foreach ($this->iterable($this->forge->serverSites($this->organizationSlug, (int) $serverId)) as $site) {
             $sites[] = $this->siteData($site);
         }
         return $sites;
@@ -29,7 +29,7 @@ final class ForgeApiClient implements ForgeCapabilitiesClientInterface
     {
         $sitePayload = [
             'domain' => (string) ($payload['domain'] ?? ''),
-            'type' => 'php',
+            'type' => (string) ($payload['project_type'] ?? $payload['type'] ?? 'php'),
         ];
         if (isset($payload['tags']) && is_array($payload['tags'])) {
             $sitePayload['tags'] = array_values($payload['tags']);
@@ -109,6 +109,20 @@ final class ForgeApiClient implements ForgeCapabilitiesClientInterface
         );
     }
 
+    public function activeCertificate(string $serverId, string $siteId, string $domainId): ?array
+    {
+        try {
+            return $this->resourceData($this->forge->activeDomainCertificate(
+                $this->organizationSlug,
+                (int) $serverId,
+                (int) $siteId,
+                (int) $domainId,
+            ));
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
     public function backgroundProcesses(string $serverId): array
     {
         return $this->resources($this->forge->backgroundProcesses(
@@ -173,11 +187,11 @@ final class ForgeApiClient implements ForgeCapabilitiesClientInterface
         ];
     }
 
-    /** @param iterable<object> $resources @return list<array<string, mixed>> */
-    private function resources(iterable $resources): array
+    /** @return list<array<string, mixed>> */
+    private function resources(mixed $resources): array
     {
         $result = [];
-        foreach ($resources as $resource) {
+        foreach ($this->iterable($resources) as $resource) {
             $result[] = $this->resourceData($resource);
         }
 
@@ -204,7 +218,7 @@ final class ForgeApiClient implements ForgeCapabilitiesClientInterface
             $line = $key.'='.$this->dotenvValue($value);
             $pattern = '/^'.preg_quote($key, '/').'=.*$/m';
             if (preg_match($pattern, $existing) === 1) {
-                $existing = (string) preg_replace($pattern, $line, $existing);
+                $existing = (string) preg_replace_callback($pattern, static fn (): string => $line, $existing);
             } else {
                 $existing = rtrim($existing, "\n")."\n".$line."\n";
             }
@@ -215,6 +229,24 @@ final class ForgeApiClient implements ForgeCapabilitiesClientInterface
 
     private function dotenvValue(string $value): string
     {
-        return preg_match('/[\s#=]/', $value) === 1 ? '"'.str_replace('"', '\\"', $value).'"' : $value;
+        if (preg_match('/[\s#=\\"]/', $value) !== 1) {
+            return $value;
+        }
+
+        return '"'.str_replace(
+            ['\\', '"', "\r", "\n"],
+            ['\\\\', '\\"', '\\r', '\\n'],
+            $value,
+        ).'"';
+    }
+
+    /** @return iterable<object> */
+    private function iterable(mixed $resources): iterable
+    {
+        if (is_object($resources) && method_exists($resources, 'lazy')) {
+            return $resources->lazy();
+        }
+
+        return is_iterable($resources) ? $resources : [];
     }
 }

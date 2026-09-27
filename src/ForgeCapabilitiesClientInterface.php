@@ -26,6 +26,9 @@ interface ForgeCapabilitiesClientInterface extends ForgeClientInterface
     /** @param array<string, mixed> $payload */
     public function createCertificate(string $serverId, string $siteId, string $domainId, array $payload): void;
 
+    /** @return array<string, mixed>|null */
+    public function activeCertificate(string $serverId, string $siteId, string $domainId): ?array;
+
     /** @return list<array<string, mixed>> */
     public function backgroundProcesses(string $serverId): array;
 

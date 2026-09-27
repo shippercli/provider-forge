@@ -70,6 +70,7 @@ it('applies configured Forge capabilities through the extended client', function
         public function domains(string $serverId, string $siteId): array { return [['id' => 30, 'name' => 'example.test']]; }
         public function createDomain(string $serverId, string $siteId, array $payload): array { return ['id' => 30, 'name' => $payload['name']]; }
         public function createCertificate(string $serverId, string $siteId, string $domainId, array $payload): void { $this->calls[] = ['certificate', $payload]; }
+        public function activeCertificate(string $serverId, string $siteId, string $domainId): ?array { return null; }
         public function backgroundProcesses(string $serverId): array { return []; }
         public function createBackgroundProcess(string $serverId, array $payload): array { $this->calls[] = ['worker', $payload]; return []; }
         public function scheduledJobs(string $serverId): array { return []; }
