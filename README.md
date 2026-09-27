@@ -13,6 +13,11 @@ Laravel Forge provider plugin for Shipper CLI.
 > delete a site unless its `shipper-managed` tag is present. Server lifecycle
 > and deployment rollback are not exposed by the Forge API v2 contract.
 
+Owned preview sites are exposed to Shipper's orphan-cleanup flow and can be
+removed only when the ownership tag is present. Forge API v2 does not expose a
+safe association between server-level databases and sites, so preview cleanup
+does not delete databases automatically.
+
 ## Installation
 
 ```bash
