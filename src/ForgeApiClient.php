@@ -215,6 +215,9 @@ final class ForgeApiClient implements ForgeCapabilitiesClientInterface
     private function mergeEnvironment(string $existing, array $variables): string
     {
         foreach ($variables as $key => $value) {
+            if (preg_match('/\A[A-Za-z_][A-Za-z0-9_]*\z/', $key) !== 1) {
+                throw new \InvalidArgumentException('Invalid environment variable name.');
+            }
             $line = $key.'='.$this->dotenvValue($value);
             $pattern = '/^'.preg_quote($key, '/').'=.*$/m';
             if (preg_match($pattern, $existing) === 1) {
@@ -229,13 +232,13 @@ final class ForgeApiClient implements ForgeCapabilitiesClientInterface
 
     private function dotenvValue(string $value): string
     {
-        if (preg_match('/[\s#=\\"]/', $value) !== 1) {
+        if (preg_match('/[\s#=\\"\x27$]/', $value) !== 1) {
             return $value;
         }
 
         return '"'.str_replace(
-            ['\\', '"', "\r", "\n"],
-            ['\\\\', '\\"', '\\r', '\\n'],
+            ['\\', '"', '$', "\r", "\n"],
+            ['\\\\', '\\"', '\\$', '\\r', '\\n'],
             $value,
         ).'"';
     }
