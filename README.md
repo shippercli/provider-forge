@@ -140,3 +140,10 @@ echo cursor contents. The SDK itself is unchanged; direct SDK `lazy()` consumers
 outside the provider adapter do not gain this protection. A server that emits
 unbounded unique cursors is not bounded by this cycle check, and inventory reads
 still do not provide transactional consistency.
+
+Provider inventory reads reject repeated resource IDs across all cursor pages.
+Site discovery also rejects duplicate site names regardless of letter case,
+so ambiguous records cannot be selected as a first match. Separate workload
+records may share a command; uniqueness is based on their IDs. Invalid reads
+throw before the accumulated inventory is returned. This is observation-time
+validation and does not lock or snapshot the remote account.

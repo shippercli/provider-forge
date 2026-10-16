@@ -56,3 +56,30 @@ it('preserves valid active certificate state through the adapter', function (): 
     expect($certificate['id'])->toBe(31)->and($certificate['active'])->toBeTrue()
         ->and($certificate['status'])->toBe('installed');
 });
+
+it('rejects repeated resource IDs across cursor pages', function (string $method): void {
+    $responses = [];
+    foreach (['next', null] as $cursor) {
+        $responses[] = new Response(200, [], json_encode(['data' => [['id' => '21', 'type' => 'resource',
+            'attributes' => ['name' => 'fixture', 'command' => 'fixture']]], 'meta' => ['next_cursor' => $cursor]]));
+    }
+    $args = $method === 'domains' ? ['7', '12'] : ['7'];
+    expect(fn () => forgeSuccessClient($responses)->{$method}(...$args))
+        ->toThrow(RuntimeException::class, 'duplicate');
+})->with(['sites', 'databases', 'domains', 'backgroundProcesses', 'scheduledJobs']);
+
+it('rejects ambiguous site names even when IDs differ', function (): void {
+    $response = new Response(200, [], json_encode(['data' => [
+        ['id' => '1', 'type' => 'sites', 'attributes' => ['name' => 'fixture.test']],
+        ['id' => '2', 'type' => 'sites', 'attributes' => ['name' => 'FIXTURE.test']],
+    ], 'meta' => ['next_cursor' => null]]));
+    expect(fn () => forgeSuccessClient([$response])->sites('7'))->toThrow(RuntimeException::class, 'duplicate');
+});
+
+it('preserves distinct workload identities sharing one command', function (string $method): void {
+    $response = new Response(200, [], json_encode(['data' => [
+        ['id' => '1', 'type' => 'resource', 'attributes' => ['command' => 'php artisan schedule:run']],
+        ['id' => '2', 'type' => 'resource', 'attributes' => ['command' => 'php artisan schedule:run']],
+    ], 'meta' => ['next_cursor' => null]]));
+    expect(array_column(forgeSuccessClient([$response])->{$method}('7'), 'id'))->toBe([1, 2]);
+})->with(['scheduledJobs', 'backgroundProcesses']);

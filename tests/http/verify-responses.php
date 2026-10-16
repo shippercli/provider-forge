@@ -66,3 +66,19 @@ foreach (['cursor-self', 'cursor-cycle', 'cursor-valid'] as $case) {
     }
 }
 echo "Ten real HTTP cursor cycle rejections and five valid chain controls passed\n";
+
+foreach (['sites', 'databases', 'domains', 'backgroundProcesses', 'scheduledJobs', 'duplicate-site'] as $scenario) {
+    $method = $scenario === 'duplicate-site' ? 'sites' : $scenario;
+    $sdk = new ForgeInventoryClient('synthetic-authorization-secret', new Client(['base_uri' => $argv[1].'/',
+        'headers' => ['Authorization' => 'Bearer synthetic-authorization-secret',
+            'X-Fixture-Case' => $scenario === 'duplicate-site' ? 'duplicate-site' : 'duplicate-id']]));
+    $adapter = (new ReflectionClass(\ShipperCli\ProviderForge\ForgeApiClient::class))->newInstanceWithoutConstructor();
+    (new ReflectionProperty($adapter, 'forge'))->setValue($adapter, $sdk);
+    (new ReflectionProperty($adapter, 'organizationSlug'))->setValue($adapter, 'org');
+    $failure = null;
+    try { $adapter->{$method}(...($method === 'domains' ? ['7', '12'] : ['7'])); }
+    catch (RuntimeException $exception) { $failure = $exception; }
+    $expected = $method === 'sites' ? 'Forge returned a duplicate site identity.' : 'Forge returned a duplicate resource identity.';
+    if ($failure === null || $failure->getMessage() !== $expected) throw new RuntimeException('Duplicate Forge identity accepted: '.$scenario);
+}
+echo "Six real HTTP duplicate identity rejections passed\n";

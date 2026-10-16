@@ -19,8 +19,18 @@ final class ForgeApiClient implements ForgeCapabilitiesClientInterface
     public function sites(string $serverId): array
     {
         $sites = [];
+        $ids = [];
+        $names = [];
         foreach ($this->iterable($this->forge->serverSites($this->organizationSlug, (int) $serverId)) as $site) {
-            $sites[] = $this->siteData($site);
+            $data = $this->siteData($site);
+            $id = (int) $data['id'];
+            $name = \strtolower($data['name']);
+            if (isset($ids[$id]) || isset($names[$name])) {
+                throw new RuntimeException('Forge returned a duplicate site identity.');
+            }
+            $ids[$id] = true;
+            $names[$name] = true;
+            $sites[] = $data;
         }
         return $sites;
     }
@@ -210,6 +220,7 @@ final class ForgeApiClient implements ForgeCapabilitiesClientInterface
     private function resources(mixed $resources, string $identityField): array
     {
         $result = [];
+        $ids = [];
         foreach ($this->iterable($resources) as $resource) {
             $data = $this->resourceData($resource);
             if ((! is_int($data['id'] ?? null) && ! is_string($data['id'] ?? null))
@@ -217,6 +228,11 @@ final class ForgeApiClient implements ForgeCapabilitiesClientInterface
                 || ! is_string($data[$identityField] ?? null) || trim($data[$identityField]) === '') {
                 throw new RuntimeException('Forge returned a resource without a valid reconciliation identity.');
             }
+            $id = (int) $data['id'];
+            if (isset($ids[$id])) {
+                throw new RuntimeException('Forge returned a duplicate resource identity.');
+            }
+            $ids[$id] = true;
             $result[] = $data;
         }
 
