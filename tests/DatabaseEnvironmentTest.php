@@ -112,6 +112,7 @@ it('checks database names after actual Forge SDK response hydration', function (
     $client = forgeSuccessClient([
         new \GuzzleHttp\Psr7\Response(200, [], '{"data":[],"meta":{"next_cursor":null}}'),
         new \GuzzleHttp\Psr7\Response(200, [], json_encode(['data' => ['id' => '21', 'type' => 'databases', 'attributes' => ['name' => $returnedName]]], JSON_THROW_ON_ERROR)),
+        new \GuzzleHttp\Psr7\Response(200, [], json_encode(['data' => ['id' => '21', 'type' => 'databases', 'attributes' => ['name' => $returnedName, 'status' => 'installed']]], JSON_THROW_ON_ERROR)),
     ]);
     $project = new class {
         public function databases(): array { return [new class {
