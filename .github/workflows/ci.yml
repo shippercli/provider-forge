@@ -19,3 +19,4 @@ jobs:
           coverage: none
       - run: composer install --no-interaction --prefer-dist
       - run: composer test
+      - run: python3 tests/http/test_responses.py

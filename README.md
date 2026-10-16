@@ -88,3 +88,20 @@ or differently scoped collision, or an inventory read failure, produces
 `blocked: true` and a single blocked action instead of deployment actions.
 Planning performs no writes. Database and workload reconciliation prerequisites
 still require separate validation during apply.
+
+### SDK transport boundaries
+
+The provider's Forge SDK wrapper disables redirects on every request, applies the
+configured timeout, and handles non-2xx statuses before interpreting successful
+response data. It retains the SDK's exception types (including certificate 404
+absence handling) while replacing server error bodies with a status-only message.
+Numeric rate-limit reset information is preserved. Transport errors expose a
+fixed diagnostic without raw request URLs or underlying exception messages.
+Successful responses and application logs are not automatically redacted.
+
+`python3 tests/http/test_responses.py` exercises the actual Guzzle/SDK path using
+synthetic credentials and loopback HTTP. It covers GET/POST across five redirect
+and eight error statuses with JSON/text bodies, verifies no redirect endpoint is
+contacted, and checks successful decoding. The original wrapper followed a 301
+and exposed a credential echoed in a 400 error; the fixed wrapper rejects both.
+This runs in CI and does not establish live Forge API compatibility.
