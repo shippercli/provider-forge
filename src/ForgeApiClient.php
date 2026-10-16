@@ -13,7 +13,7 @@ final class ForgeApiClient implements ForgeCapabilitiesClientInterface
 
     public function __construct(private readonly string $organizationSlug, string $apiToken, int $timeout = 30)
     {
-        $this->forge = (new Forge($apiToken))->setTimeout($timeout);
+        $this->forge = (new ForgeInventoryClient($apiToken))->setTimeout($timeout);
     }
 
     public function sites(string $serverId): array
@@ -184,9 +184,16 @@ final class ForgeApiClient implements ForgeCapabilitiesClientInterface
     private function siteData(object $site): array
     {
         $attributes = property_exists($site, 'attributes') && is_array($site->attributes) ? $site->attributes : [];
+        $id = $site->id ?? ($attributes['id'] ?? null);
+        $name = $site->name ?? ($attributes['name'] ?? null);
+        if ((! is_int($id) && ! is_string($id))
+            || filter_var($id, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) === false
+            || ! is_string($name) || trim($name) === '') {
+            throw new RuntimeException('Forge returned a site without a valid identity.');
+        }
         return [
-            'id' => $site->id ?? ($attributes['id'] ?? null),
-            'name' => $site->name ?? ($attributes['name'] ?? null),
+            'id' => $id,
+            'name' => $name,
             'tags' => $site->tags ?? ($attributes['tags'] ?? []),
             'repository' => $site->repository ?? ($attributes['repository'] ?? null),
         ];
@@ -255,6 +262,10 @@ final class ForgeApiClient implements ForgeCapabilitiesClientInterface
             return $resources->lazy();
         }
 
-        return is_iterable($resources) ? $resources : [];
+        if (! is_iterable($resources)) {
+            throw new RuntimeException('Forge returned an invalid resource collection.');
+        }
+
+        return $resources;
     }
 }
