@@ -27,7 +27,7 @@ it('rejects environment names that could inject additional assignments', functio
 
 it('replaces complete multiline and exported assignments while preserving other content', function (): void {
     $client = (new ReflectionClass(ForgeApiClient::class))->newInstanceWithoutConstructor();
-    $existing = "# retained comment\nexport TOKEN = \"old\nvalue\"\nKEEP='untouched'\n";
+    $existing = "# retained comment\nexport TOKEN=\"old\nvalue\"\nKEEP='untouched'\n";
     $result = (new ReflectionMethod($client, 'mergeEnvironment'))->invoke($client, $existing, [
         'TOKEN' => 'replacement',
         'PATH_VALUE' => 'C:\\deployment\\app',
@@ -41,3 +41,9 @@ it('replaces complete multiline and exported assignments while preserving other 
         'SECRET' => "literal\$value # with \"quotes\"\nand newline",
     ])->and($result)->toContain('# retained comment');
 });
+
+it('refuses malformed existing content before rendering a replacement', function (string $existing): void {
+    $client = (new ReflectionClass(ForgeApiClient::class))->newInstanceWithoutConstructor();
+    expect(fn () => (new ReflectionMethod($client, 'mergeEnvironment'))->invoke($client, $existing, ['TOKEN' => 'replacement']))
+        ->toThrow(RuntimeException::class, 'Cannot parse the existing Forge site environment before updating it.');
+})->with(['TOKEN="unfinished', "KEEP=retained\nBROKEN='unfinished", "INVALID NAME=value\n"]);

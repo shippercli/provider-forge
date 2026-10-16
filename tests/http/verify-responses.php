@@ -232,3 +232,19 @@ if (($finalEnvironment['DB_PASSWORD'] ?? null) !== $partialOptions['database_pas
     || ($finalEnvironment['ANALYTICS_DB_PASSWORD'] ?? null) !== $partialOptions['database_password']
     || ($finalEnvironment['APP_ENV'] ?? null) !== 'production') throw new RuntimeException('Partial database retry did not preserve connection values');
 echo "Confirmed first connection survives second creation failure and fresh provider retry over real HTTP\n";
+
+
+foreach (['double', 'single', 'name'] as $suffix) {
+    $sdk = new ForgeInventoryClient('synthetic-authorization-secret', new Client(['base_uri' => $argv[1].'/',
+        'headers' => ['X-Fixture-Case' => 'malformed-env-'.$suffix, 'Authorization' => 'Bearer synthetic-authorization-secret']]));
+    $adapter = (new ReflectionClass(\ShipperCli\ProviderForge\ForgeApiClient::class))->newInstanceWithoutConstructor();
+    (new ReflectionProperty($adapter, 'forge'))->setValue($adapter, $sdk);
+    (new ReflectionProperty($adapter, 'organizationSlug'))->setValue($adapter, 'org');
+    $failure = null;
+    try { $adapter->updateEnvironment('7', '55', ['TOKEN' => 'replacement']); }
+    catch (RuntimeException $error) { $failure = $error; }
+    if ($failure?->getMessage() !== 'Cannot parse the existing Forge site environment before updating it.' || $failure->getPrevious() !== null) {
+        throw new RuntimeException('Malformed existing environment was accepted or leaked diagnostics');
+    }
+}
+echo "Three malformed existing environments refused before HTTP update\n";

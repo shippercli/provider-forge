@@ -269,6 +269,16 @@ final class ForgeApiClient implements ForgeCapabilitiesClientInterface
     /** @param array<string, string> $variables */
     private function mergeEnvironment(string $existing, array $variables): string
     {
+        try {
+            $probe = '__SHIPPER_ENV_END_'.bin2hex(random_bytes(16));
+            $parsed = \Dotenv\Dotenv::parse($existing."\n".$probe."=1\n");
+            if (($parsed[$probe] ?? null) !== '1') {
+                throw new RuntimeException('Incomplete environment.');
+            }
+        } catch (\Throwable) {
+            throw new RuntimeException('Cannot parse the existing Forge site environment before updating it.');
+        }
+
         foreach ($variables as $key => $value) {
             if (preg_match('/\A[A-Za-z_][A-Za-z0-9_]*\z/', $key) !== 1) {
                 throw new \InvalidArgumentException('Invalid environment variable name.');
