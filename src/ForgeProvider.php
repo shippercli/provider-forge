@@ -158,9 +158,9 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
                     'project_type' => method_exists($project, 'type')
                         ? (string) $project->type()
                         : (string) ($this->config['project_type'] ?? 'php'),
-                    'tags' => [$this->ownershipTag()],
+                    'tags' => [$this->ownershipTag($project, $profile)],
                 ]);
-            } elseif (! $this->isOwnedSite($site)) {
+            } elseif (! $this->isOwnedSite($site, $project, $profile)) {
                 throw new RuntimeException('Forge site exists but is not owned by Shipper; refusing to modify it');
             }
             $siteId = $this->siteId($site);
@@ -191,7 +191,7 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
                 $this->lastError = '';
                 return true;
             }
-            if (! $this->isOwnedSite($site)) {
+            if (! $this->isOwnedSite($site, $project, $profile)) {
                 throw new RuntimeException('Forge site is not owned by Shipper; refusing to destroy it');
             }
             $siteId = $this->siteId($site);
@@ -212,7 +212,7 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
     {
         $sites = [];
         foreach ($this->forgeClient()->sites($this->getServerId()) as $site) {
-            if (! $this->isOwnedSite($site)) {
+            if (! $this->isOwnedSite($site, $project, $profile)) {
                 continue;
             }
 
@@ -234,7 +234,7 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
             if ($this->siteId($site) !== (string) $siteId) {
                 continue;
             }
-            if (! $this->isOwnedSite($site)) {
+            if (! $this->isOwnedSite($site, $project, $profile)) {
                 $this->lastError = 'Forge site is not owned by Shipper; refusing to destroy it';
 
                 return false;
@@ -568,14 +568,14 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
     }
 
     /** @param array<string, mixed> $site */
-    private function isOwnedSite(array $site): bool
+    private function isOwnedSite(array $site, object $project, object $profile): bool
     {
         $tags = $site['tags'] ?? [];
-        return is_array($tags) && in_array($this->ownershipTag(), $tags, true);
+        return is_array($tags) && in_array($this->ownershipTag($project, $profile), $tags, true);
     }
 
-    private function ownershipTag(): string
+    private function ownershipTag(object $project, object $profile): string
     {
-        return (string) ($this->config['ownership_tag'] ?? 'shipper-managed');
+        return (string) ($this->config['ownership_tag'] ?? 'shipper-managed').'-'.substr(hash('sha256', json_encode([$this->projectName($project), $this->profileName($profile)], JSON_THROW_ON_ERROR)), 0, 20);
     }
 }

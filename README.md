@@ -34,6 +34,24 @@ Configure `api_token`, `organization_slug`, and `server_id`, plus
 `ownership_tag`. The default ownership tag is `shipper-managed`; do not remove
 it from a Shipper-managed site if cleanup is required.
 
+## Site ownership scope
+
+New sites receive a project/profile-scoped ownership tag. The tag is the
+configured `ownership_tag` prefix (default `shipper-managed`), a hyphen, and the
+first 20 hexadecimal characters of the SHA-256 hash of the JSON-encoded
+`[projectName, profileName]` pair:
+
+```php
+$tag = $prefix.'-'.substr(hash('sha256', json_encode([$projectName, $profileName], JSON_THROW_ON_ERROR)), 0, 20);
+```
+
+Apply, destroy, and preview cleanup require this exact tag. The old generic
+`shipper-managed` tag is insufficient because it does not establish which
+deployment owns the site. Existing generic-tagged sites fail closed until an
+operator reviews the site and explicitly adds the appropriate scoped tag through
+Forge. Review the server, domain, project, and profile before migrating a tag;
+the provider does not automatically adopt or retag existing sites.
+
 ## Database connection environments
 
 A single new database supplies `DB_HOST`, `DB_DATABASE`, `DB_USERNAME`, and
