@@ -139,3 +139,20 @@ foreach (['sites/21', 'database/schemas/21', 'background-processes/21', 'schedul
     if ($failure === null || $failure->getMessage() !== 'Forge returned an invalid resource response envelope.') throw new RuntimeException('Foreign detail identity accepted');
 }
 echo "Resource creation, certificate and matching-detail HTTP checks passed\n";
+
+foreach (['wrong-domain', 'domain-case'] as $case) {
+    $sdk = new ForgeInventoryClient('synthetic-authorization-secret', new Client(['base_uri' => $argv[1].'/',
+        'headers' => ['Authorization' => 'Bearer synthetic-authorization-secret', 'X-Fixture-Case' => 'resource-'.$case]]));
+    $adapter = (new ReflectionClass(\ShipperCli\ProviderForge\ForgeApiClient::class))->newInstanceWithoutConstructor();
+    (new ReflectionProperty($adapter, 'forge'))->setValue($adapter, $sdk);
+    (new ReflectionProperty($adapter, 'organizationSlug'))->setValue($adapter, 'org');
+    $failure = null;
+    try { $site = $adapter->createSite('7', ['domain' => 'fixture.test']); }
+    catch (RuntimeException $exception) { $failure = $exception; }
+    if ($case === 'domain-case') {
+        if ($failure !== null || ($site['id'] ?? null) !== 21) throw new RuntimeException('Case-equivalent created domain rejected');
+    } elseif ($failure === null || $failure->getMessage() !== 'Forge created site did not confirm the requested domain.') {
+        throw new RuntimeException('Foreign created site domain accepted');
+    }
+}
+echo "Created site domain mismatch rejection and case-equivalent control passed\n";

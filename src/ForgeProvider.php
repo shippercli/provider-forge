@@ -182,6 +182,12 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
                         : (string) ($this->config['project_type'] ?? 'php'),
                     'tags' => [$this->ownershipTag($project, $profile)],
                 ]);
+                $returnedDomain = $site['name'] ?? $site['domain'] ?? null;
+                if (! \is_string($returnedDomain) || \trim($returnedDomain) !== $returnedDomain
+                    || \strcasecmp($returnedDomain, $domain) !== 0
+                    || (isset($site['domain']) && (! \is_string($site['domain']) || \strcasecmp($site['domain'], $domain) !== 0))) {
+                    throw new RuntimeException('Forge created site did not confirm the requested domain.');
+                }
             } elseif (! $this->isOwnedSite($site, $project, $profile)) {
                 throw new RuntimeException('Forge site exists but is not owned by Shipper; refusing to modify it');
             }

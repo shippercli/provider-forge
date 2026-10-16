@@ -46,7 +46,11 @@ final class ForgeApiClient implements ForgeCapabilitiesClientInterface
         }
 
         $site = $this->forge->createSite($this->organizationSlug, (int) $serverId, $sitePayload);
-        return $this->siteData($site);
+        $data = $this->siteData($site);
+        if (\trim($data['name']) !== $data['name'] || \strcasecmp($data['name'], $sitePayload['domain']) !== 0) {
+            throw new RuntimeException('Forge created site did not confirm the requested domain.');
+        }
+        return $data;
     }
 
     public function deploy(string $serverId, string $siteId): void

@@ -26,6 +26,8 @@ class ResponsesTest(unittest.TestCase):
                     variant = case.removeprefix('resource-')
                     record = {'id': '22' if variant == 'foreign' else '21', 'type': 'resource',
                         'attributes': {'name': 'fixture.test', 'command': 'fixture', 'status': 'installed', 'active': True}}
+                    if variant == 'wrong-domain': record['attributes']['name'] = 'other.test'
+                    elif variant == 'domain-case': record['attributes']['name'] = 'FIXTURE.test'
                     envelope = {'data': record}
                     if variant == 'fraction': record['id'] = 21.5
                     elif variant == 'shadow': record['attributes']['id'] = 22
@@ -100,7 +102,7 @@ class ResponsesTest(unittest.TestCase):
                 result = subprocess.run(['php', str(Path(__file__).with_name('verify-responses.php')), f'http://127.0.0.1:{server.server_port}'], capture_output=True, text=True, timeout=15)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertEqual(redirected, [])
-                self.assertEqual(len(received), 211)
+                self.assertEqual(len(received), 213)
                 self.assertTrue(all(auth == 'Bearer synthetic-authorization-secret' for _, auth, _ in received))
                 self.assertEqual(sum(b'synthetic-body-secret' in body for _, _, body in received), 26)
             finally:

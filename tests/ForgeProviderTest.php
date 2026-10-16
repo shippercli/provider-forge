@@ -179,3 +179,20 @@ it('refuses generic or differently scoped ownership tags across mutation paths',
     'shipper-managed-'.substr(hash('sha256', json_encode(['other', 'production'], JSON_THROW_ON_ERROR)), 0, 20),
     'shipper-managed-'.substr(hash('sha256', json_encode(['api', 'preview'], JSON_THROW_ON_ERROR)), 0, 20),
 ]);
+
+it('checks the created site domain before deploying', function (mixed $name, bool $valid): void {
+    $client = new class($name) implements \ShipperCli\ProviderForge\ForgeClientInterface {
+        public int $deploys = 0;
+        public function __construct(private mixed $name) {}
+        public function sites(string $serverId): array { return []; }
+        public function createSite(string $serverId, array $payload): array { return ['id' => 12, 'name' => $this->name]; }
+        public function deploy(string $serverId, string $siteId): void { $this->deploys++; }
+        public function deleteSite(string $serverId, string $siteId): void { throw new LogicException('Unexpected delete'); }
+    };
+    $provider = new ForgeProvider(['api_token' => 'token', 'server_id' => 7, 'organization_slug' => 'shipper'], $client);
+    $project = new class { public function get(string $key): mixed { return $key === 'repository' ? 'shippercli/example' : null; } };
+    $profile = new class { public function get(string $key): mixed { return ['domain' => 'example.test', 'branch' => 'main'][$key] ?? null; } };
+    expect($provider->apply($project, $profile))->toBe($valid)->and($client->deploys)->toBe($valid ? 1 : 0);
+    if ($valid) expect($provider->getLastError())->toBe('');
+    else expect($provider->getLastError())->toContain('requested domain');
+})->with([['other.test', false], [' example.test', false], ['example.test ', false], ['', false], [null, false], ['EXAMPLE.test', true]]);

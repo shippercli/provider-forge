@@ -165,3 +165,11 @@ Protected detail responses must match the ID in the requested URL. Certificate
 a create request had no effect: inspect the account before retrying a creation.
 This validates response identity, not full requested configuration or completed
 provisioning. Other endpoint families retain their existing checks.
+
+Site creation acknowledgements must confirm the requested domain (matching
+letter case is not required). Both the API adapter and provider apply path
+reject a mismatched or padded returned domain before configuration/deployment;
+a valid ID alone is insufficient. Rejection does not delete the returned site
+or automatically retry creation. Inspect the account before retrying because
+the original request may have created a resource. Domain confirmation does not
+prove all settings, ownership tags, provisioning completion or public serving.

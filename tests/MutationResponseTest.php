@@ -40,3 +40,9 @@ it('rejects detail responses for a different requested identity', function (stri
 })->with(['orgs/org/servers/7/sites/21', 'orgs/org/servers/7/database/schemas/21',
     'orgs/org/servers/7/background-processes/21', 'orgs/org/servers/7/scheduled-jobs/21',
     'orgs/org/servers/7/sites/12/domains/21']);
+
+it('rejects a created site acknowledgement for another domain', function (): void {
+    $response = new Response(200, [], '{"data":{"id":"21","attributes":{"name":"other.test"}}}');
+    expect(fn () => forgeSuccessClient([$response])->createSite('7', ['domain' => 'fixture.test']))
+        ->toThrow(RuntimeException::class, 'requested domain');
+});
