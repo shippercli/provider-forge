@@ -105,3 +105,16 @@ and eight error statuses with JSON/text bodies, verifies no redirect endpoint is
 contacted, and checks successful decoding. The original wrapper followed a 301
 and exposed a credential echoed in a 400 error; the fixed wrapper rejects both.
 This runs in CI and does not establish live Forge API compatibility.
+
+
+### Distribution archive checks
+
+Composer archive exclusions and Git export attributes omit installed dependencies,
+tests, workflow files, root environment/auth configuration, and PHPUnit caches and
+configuration. Runtime source, package metadata, documentation, and assets remain
+available. `python3 tests/package/verify-dist.py` checks Composer and Git exports,
+then loads all declared runtime classes from an extracted ZIP with an overridden
+class map. Dependency classes come from the installed checkout; this check does
+not perform a fresh production dependency install or live deployment. CI runs it
+with the existing provider tests. Git export verification uses current worktree
+attributes; committed attributes determine subsequent GitHub source archives.
