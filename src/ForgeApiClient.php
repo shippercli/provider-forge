@@ -11,8 +11,16 @@ final class ForgeApiClient implements ForgeCapabilitiesClientInterface
 {
     private readonly Forge $forge;
 
-    public function __construct(private readonly string $organizationSlug, string $apiToken, int $timeout = 30)
+    private int $deploymentTimeout = 300;
+
+    private int $deploymentPollMilliseconds = 1000;
+
+    public function __construct(private readonly string $organizationSlug, string $apiToken, int $timeout = 30, int $deploymentTimeout = 300)
     {
+        if ($deploymentTimeout < 1 || $deploymentTimeout > 3600) {
+            throw new \InvalidArgumentException('Forge deployment timeout must be between 1 and 3600 seconds.');
+        }
+        $this->deploymentTimeout = $deploymentTimeout;
         $this->forge = (new ForgeInventoryClient($apiToken))->setTimeout($timeout);
     }
 
@@ -55,7 +63,29 @@ final class ForgeApiClient implements ForgeCapabilitiesClientInterface
 
     public function deploy(string $serverId, string $siteId): void
     {
-        $this->forge->createDeployment($this->organizationSlug, (int) $serverId, (int) $siteId);
+        $deadline = hrtime(true) / 1_000_000_000 + $this->deploymentTimeout;
+        $deployment = $this->forge->createDeployment($this->organizationSlug, (int) $serverId, (int) $siteId);
+        $id = $deployment->id;
+        if (! is_int($id) || $id <= 0) throw new RuntimeException('Forge did not confirm a deployment identity.');
+        while (true) {
+            if (hrtime(true) / 1_000_000_000 >= $deadline) {
+                throw new RuntimeException('Forge deployment timed out; the remote deployment may still be running.');
+            }
+            if ($deployment->id !== $id) throw new RuntimeException('Forge deployment identity changed while polling.');
+            if ($deployment->status === 'finished') return;
+            if (in_array($deployment->status, ['failed', 'failed-build', 'cancelled'], true)) {
+                throw new RuntimeException('Forge deployment did not finish successfully ('.$deployment->status.').');
+            }
+            if (! in_array($deployment->status, ['pending', 'queued', 'deploying'], true)) {
+                throw new RuntimeException('Forge returned an invalid deployment status.');
+            }
+            $remaining = $deadline - hrtime(true) / 1_000_000_000;
+            if ($remaining > 0 && $this->deploymentPollMilliseconds > 0) {
+                usleep((int) (min($remaining, $this->deploymentPollMilliseconds / 1000) * 1_000_000));
+            }
+            if (hrtime(true) / 1_000_000_000 >= $deadline) continue;
+            $deployment = $this->forge->deployment($this->organizationSlug, (int) $serverId, (int) $siteId, $id);
+        }
     }
 
     public function deleteSite(string $serverId, string $siteId): void

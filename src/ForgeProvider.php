@@ -54,6 +54,7 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
     {
         $errors = [];
         try {
+            $this->deploymentTimeout();
             $this->databaseEnvironmentPrefixes($project, $profile);
             $this->configuredDatabasePasswords($project, $profile);
         } catch (\InvalidArgumentException $exception) {
@@ -82,6 +83,7 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
 
     public function plan(object $project, object $profile): array
     {
+        $this->deploymentTimeout();
         $this->databaseEnvironmentPrefixes($project, $profile);
         $this->configuredDatabasePasswords($project, $profile);
         $serverId = $this->getServerId();
@@ -336,11 +338,21 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
         return $name;
     }
 
+    private function deploymentTimeout(): int
+    {
+        $timeout = array_key_exists('deployment_timeout', $this->config) ? $this->config['deployment_timeout'] : 300;
+        if (! is_int($timeout) || $timeout < 1 || $timeout > 3600) {
+            throw new \InvalidArgumentException('Forge deployment timeout must be between 1 and 3600 seconds.');
+        }
+        return $timeout;
+    }
+
     private function forgeClient(): ForgeClientInterface
     {
         return $this->client ?? new ForgeApiClient(
             (string) $this->config['organization_slug'],
             (string) $this->config['api_token'],
+            deploymentTimeout: $this->deploymentTimeout(),
         );
     }
 

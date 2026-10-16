@@ -281,3 +281,20 @@ foreach (['missing', 'attributes', 'null', 'number', 'false', 'errors', 'valid']
     }
 }
 echo "Seven raw environment envelope real HTTP controls passed\n";
+
+
+foreach (['finished', 'failed', 'failed-build', 'cancelled', 'wrong-id', 'progress'] as $result) {
+    $sdk = new ForgeInventoryClient('synthetic-authorization-secret', new Client(['base_uri' => $argv[1].'/',
+        'headers' => ['X-Fixture-Case' => 'deployment-result-'.$result, 'Authorization' => 'Bearer synthetic-authorization-secret']]));
+    $adapter = (new ReflectionClass(\ShipperCli\ProviderForge\ForgeApiClient::class))->newInstanceWithoutConstructor();
+    (new ReflectionProperty($adapter, 'forge'))->setValue($adapter, $sdk);
+    (new ReflectionProperty($adapter, 'organizationSlug'))->setValue($adapter, 'org');
+    (new ReflectionProperty($adapter, 'deploymentPollMilliseconds'))->setValue($adapter, 0);
+    $failure = null;
+    try { $adapter->deploy('7', '55'); }
+    catch (RuntimeException $error) { $failure = $error; }
+    if (($failure === null) !== in_array($result, ['finished', 'progress'], true)) {
+        throw new RuntimeException('Deployment result was reported incorrectly');
+    }
+}
+echo "Six real SDK exact-deployment completion scenarios passed\n";

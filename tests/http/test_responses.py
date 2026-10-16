@@ -13,6 +13,7 @@ class ResponsesTest(unittest.TestCase):
         received = []
         redirected = []
         readback_environments = {}
+        deployment_polls = {}
         partial = {'databases': [], 'environment': 'APP_ENV=production\n', 'analytics_attempts': 0}
         partial_events = []
 
@@ -25,7 +26,17 @@ class ResponsesTest(unittest.TestCase):
                 received.append((self.path, self.headers.get('Authorization'), body))
                 procedure = self.path.rsplit('/', 1)[-1]
                 case = self.headers.get('X-Fixture-Case', '')
-                if case.startswith('raw-env-'):
+                if case.startswith('deployment-result-'):
+                    result = case.removeprefix('deployment-result-')
+                    record = {'id': '21', 'type': 'deployments', 'attributes': {'status': 'queued'}}
+                    if self.command == 'GET':
+                        if not self.path.endswith('/deployments/21'):
+                            raise AssertionError('Polling must retain the created deployment ID')
+                        deployment_polls[result] = deployment_polls.get(result, 0) + 1
+                        record['attributes']['status'] = 'deploying' if result == 'progress' and deployment_polls[result] == 1 else 'finished' if result in ['finished', 'progress', 'wrong-id'] else result
+                        if result == 'wrong-id': record['id'] = '22'
+                    status, payload = 200, json.dumps({'data': record}).encode()
+                elif case.startswith('raw-env-'):
                     envelopes = {'missing': {}, 'attributes': {'data': {'attributes': {}}},
                         'null': {'data': {'attributes': {'content': None}}},
                         'number': {'data': {'attributes': {'content': 123}}},
@@ -185,7 +196,7 @@ class ResponsesTest(unittest.TestCase):
                     self.assertTrue(scoped[2][0].endswith('/database/schemas'))
                     self.assertTrue(scoped[3][0].endswith('/database/schemas/21'))
                     self.assertEqual(json.loads(scoped[2][1])['password'], 'literal-${PROJECT_NAME}-${PROFILE}-+%:@' if variant == 'valid-explicit' else 'synthetic-database-secret')
-                self.assertEqual(len(received), 265)
+                self.assertEqual(len(received), 278)
                 for variant in ['engine-mismatch', 'engine-unknown']:
                     scoped = [(path, body) for path, _, body in received if '/orgs/' + variant + '/' in path]
                     self.assertEqual(len(scoped), 1)

@@ -228,3 +228,22 @@ Creation followed by a failed or ambiguous credential-delivery request still
 requires recovery review. No durable secret journal or cross-operation lock is
 provided by this change. Keep explicitly configured passwords in a secret
 manager and do not delete/recreate production data to bypass missing credentials.
+
+### Deployment completion
+
+The official client waits for the deployment ID returned by Forge API v2 rather
+than reporting success when a deployment is merely queued. Only `finished` is
+successful. `failed`, `failed-build` and `cancelled` fail; `pending`, `queued` and
+`deploying` continue polling. Invalid identities/statuses and explicit response
+errors fail before being accepted as progress or success.
+
+`deployment_timeout` is an integer from 1 to 3600 seconds, defaulting to 300.
+Polling uses a monotonic deadline; responses arriving after expiry cannot report
+success. In-flight HTTP requests still obey the SDK transport timeout, and local
+timeout does not cancel a remote deployment. Inspect the tracked deployment before
+retrying an ambiguous outcome. Live account permissions and timing remain unverified.
+
+Custom `ForgeClientInterface` implementations must make `deploy()` wait for
+confirmed completion or throw on failure; returning after enqueueing does not
+satisfy this contract. The signature remains `void`. The simulated API tests of
+the official client do not verify third-party client implementations.

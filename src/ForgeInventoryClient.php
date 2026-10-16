@@ -44,6 +44,29 @@ final class ForgeInventoryClient extends Forge
                 throw new RuntimeException('Forge returned an invalid site environment envelope.');
             }
         }
+        $deploymentPath = [];
+        if (\preg_match('#\Aorgs/[^/]+/servers/([0-9]+)/sites/([0-9]+)/deployments(?:/([0-9]+))?\z#', $uri, $deploymentPath) === 1
+            && ((\strtoupper($verb) === 'POST' && ! isset($deploymentPath[3]))
+                || (\strtoupper($verb) === 'GET' && isset($deploymentPath[3])))) {
+            $shape = \json_decode($body);
+            $data = $shape->data ?? null;
+            $id = $data instanceof \stdClass ? $this->resourceId($data->id ?? null) : null;
+            $attributes = $data->attributes ?? null;
+            $site = $data->relationships->site->data ?? null;
+            if (! $shape instanceof \stdClass || ! $data instanceof \stdClass || $id === null
+                || ($data->type ?? null) !== 'deployments' || ! $attributes instanceof \stdClass
+                || ! \in_array($attributes->status ?? null, ['cancelled', 'deploying', 'failed', 'failed-build', 'finished', 'pending', 'queued'], true)
+                || ($shape->errors ?? []) !== [] || ! \in_array($shape->error ?? null, [null, '', false], true)
+                || (\property_exists($shape, 'success') && $shape->success !== true)
+                || (isset($deploymentPath[3]) && $id !== $this->resourceId($deploymentPath[3]))
+                || (\property_exists($attributes, 'id') && $this->resourceId($attributes->id) !== $id)
+                || (\property_exists($attributes, 'server_id') && $this->resourceId($attributes->server_id) !== $this->resourceId($deploymentPath[1]))
+                || (\property_exists($attributes, 'site_id') && $this->resourceId($attributes->site_id) !== $this->resourceId($deploymentPath[2]))
+                || ($site !== null && (! $site instanceof \stdClass || ($site->type ?? null) !== 'sites'
+                    || $this->resourceId($site->id ?? null) !== $this->resourceId($deploymentPath[2])))) {
+                throw new RuntimeException('Forge returned an invalid deployment response.');
+            }
+        }
         if (\strtoupper($verb) === 'GET' && $this->isInventoryUri($uri)) {
             $shape = \json_decode($body);
             if (! $shape instanceof \stdClass || ! \is_array($shape->data ?? null)
