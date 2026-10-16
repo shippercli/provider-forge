@@ -271,6 +271,9 @@ final class ForgeApiClient implements ForgeCapabilitiesClientInterface
     /** @return iterable<object> */
     private function iterable(mixed $resources): iterable
     {
+        if ($resources instanceof \Laravel\Forge\CursorPaginator) {
+            return $this->cursorItems($resources);
+        }
         if (is_object($resources) && method_exists($resources, 'lazy')) {
             return $resources->lazy();
         }
@@ -281,4 +284,21 @@ final class ForgeApiClient implements ForgeCapabilitiesClientInterface
 
         return $resources;
     }
+    /** @return \Generator<int, object> */
+    private function cursorItems(\Laravel\Forge\CursorPaginator $page): \Generator
+    {
+        $seen = [];
+        do {
+            $cursor = $page->nextCursor();
+            if ($cursor !== null) {
+                if (isset($seen[$cursor])) {
+                    throw new RuntimeException('Forge returned a repeated pagination cursor.');
+                }
+                $seen[$cursor] = true;
+            }
+            yield from $page->items();
+            $page = $page->nextPage();
+        } while ($page !== null);
+    }
+
 }

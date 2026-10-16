@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import subprocess
 import threading
+from urllib.parse import parse_qs, urlsplit
 import unittest
 
 
@@ -20,7 +21,17 @@ class ResponsesTest(unittest.TestCase):
                 body = self.rfile.read(int(self.headers.get('Content-Length', '0')))
                 received.append((self.path, self.headers.get('Authorization'), body))
                 procedure = self.path.rsplit('/', 1)[-1]
-                if self.path.startswith('/orgs/org/servers/7/sites'):
+                case = self.headers.get('X-Fixture-Case', '')
+                if case in ['cursor-self', 'cursor-cycle', 'cursor-valid']:
+                    cursor = parse_qs(urlsplit(self.path).query).get('page[cursor]', [None])[0]
+                    index = {None: 0, 'first': 1, 'second': 2}[cursor]
+                    chain = {'cursor-self': ['first', 'first'], 'cursor-cycle': ['first', 'second', 'first'],
+                        'cursor-valid': ['first', 'second', None]}[case]
+                    payload = json.dumps({'data': [{'id': str(index + 1), 'type': 'resource',
+                        'attributes': {'name': 'fixture-' + str(index), 'command': 'fixture-' + str(index)}}],
+                        'meta': {'next_cursor': chain[index]}}).encode()
+                    status = 200
+                elif self.path.startswith('/orgs/org/servers/7/sites'):
                     case = self.headers['X-Fixture-Case']
                     secret = self.headers.get('Authorization', '')
                     shapes = {'object': {'data': {}}, 'numeric-object': {'data': {'0': {'id': '1'}}},
@@ -57,7 +68,7 @@ class ResponsesTest(unittest.TestCase):
                 result = subprocess.run(['php', str(Path(__file__).with_name('verify-responses.php')), f'http://127.0.0.1:{server.server_port}'], capture_output=True, text=True, timeout=15)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertEqual(redirected, [])
-                self.assertEqual(len(received), 65)
+                self.assertEqual(len(received), 105)
                 self.assertTrue(all(auth == 'Bearer synthetic-authorization-secret' for _, auth, _ in received))
                 self.assertEqual(sum(b'synthetic-body-secret' in body for _, _, body in received), 26)
             finally:

@@ -47,3 +47,22 @@ foreach (['object', 'numeric-object', 'array-record', 'errors', 'error', 'false'
     }
 }
 echo "Nine real HTTP inventory shape rejections and two valid controls passed\n";
+
+foreach (['cursor-self', 'cursor-cycle', 'cursor-valid'] as $case) {
+    foreach (['sites', 'databases', 'domains', 'backgroundProcesses', 'scheduledJobs'] as $method) {
+        $sdk = new ForgeInventoryClient('synthetic-authorization-secret', new Client(['base_uri' => $argv[1].'/',
+            'headers' => ['Authorization' => 'Bearer synthetic-authorization-secret', 'X-Fixture-Case' => $case]]));
+        $adapter = (new ReflectionClass(\ShipperCli\ProviderForge\ForgeApiClient::class))->newInstanceWithoutConstructor();
+        (new ReflectionProperty($adapter, 'forge'))->setValue($adapter, $sdk);
+        (new ReflectionProperty($adapter, 'organizationSlug'))->setValue($adapter, 'org');
+        $failure = null;
+        try { $items = $adapter->{$method}(...($method === 'domains' ? ['7', '12'] : ['7'])); }
+        catch (Throwable $exception) { $failure = $exception; }
+        if ($case === 'cursor-valid') {
+            if ($failure !== null || array_column($items, 'id') !== [1, 2, 3]) throw new RuntimeException('Valid cursor chain changed');
+        } elseif (!$failure instanceof RuntimeException || $failure->getMessage() !== 'Forge returned a repeated pagination cursor.') {
+            throw new RuntimeException('Forge cursor cycle accepted: '.$case.'/'.$method);
+        }
+    }
+}
+echo "Ten real HTTP cursor cycle rejections and five valid chain controls passed\n";

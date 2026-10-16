@@ -131,3 +131,12 @@ remains supported. The guard applies to site, database, background-process,
 scheduled-job and domain collections; plaintext responses outside those
 endpoints retain their existing behavior. Diagnostics never echo the API error
 payload. These checks do not establish a remote snapshot or live compatibility.
+
+The provider adapter also detects repeated cursors within each inventory
+traversal, rejecting self-loops and longer cycles without returning accumulated
+partial records. Unique cursor chains, including empty intermediate pages,
+remain supported. Cursor tracking is local to each read and diagnostics do not
+echo cursor contents. The SDK itself is unchanged; direct SDK `lazy()` consumers
+outside the provider adapter do not gain this protection. A server that emits
+unbounded unique cursors is not bounded by this cycle check, and inventory reads
+still do not provide transactional consistency.
