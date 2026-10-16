@@ -51,7 +51,7 @@ final class ForgeApiClient implements ForgeCapabilitiesClientInterface
 
     public function databases(string $serverId): array
     {
-        return $this->resources($this->forge->databases($this->organizationSlug, (int) $serverId));
+        return $this->resources($this->forge->databases($this->organizationSlug, (int) $serverId), 'name');
     }
 
     public function createDatabase(string $serverId, array $payload): array
@@ -90,7 +90,7 @@ final class ForgeApiClient implements ForgeCapabilitiesClientInterface
             $this->organizationSlug,
             (int) $serverId,
             (int) $siteId,
-        ));
+        ), 'name');
     }
 
     public function createDomain(string $serverId, string $siteId, array $payload): array
@@ -117,13 +117,20 @@ final class ForgeApiClient implements ForgeCapabilitiesClientInterface
     public function activeCertificate(string $serverId, string $siteId, string $domainId): ?array
     {
         try {
-            return $this->resourceData($this->forge->activeDomainCertificate(
+            $certificate = $this->resourceData($this->forge->activeDomainCertificate(
                 $this->organizationSlug,
                 (int) $serverId,
                 (int) $siteId,
                 (int) $domainId,
             ));
-        } catch (\Throwable) {
+            $id = $certificate['id'] ?? null;
+            if ((! is_int($id) && ! is_string($id))
+                || filter_var($id, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) === false) {
+                throw new RuntimeException('Forge returned an invalid active certificate identity.');
+            }
+
+            return $certificate;
+        } catch (\Laravel\Forge\Exceptions\NotFoundException) {
             return null;
         }
     }
@@ -133,7 +140,7 @@ final class ForgeApiClient implements ForgeCapabilitiesClientInterface
         return $this->resources($this->forge->backgroundProcesses(
             $this->organizationSlug,
             (int) $serverId,
-        ));
+        ), 'command');
     }
 
     public function createBackgroundProcess(string $serverId, array $payload): array
@@ -150,7 +157,7 @@ final class ForgeApiClient implements ForgeCapabilitiesClientInterface
         return $this->resources($this->forge->scheduledJobs(
             $this->organizationSlug,
             (int) $serverId,
-        ));
+        ), 'command');
     }
 
     public function createScheduledJob(string $serverId, array $payload): array
@@ -200,11 +207,17 @@ final class ForgeApiClient implements ForgeCapabilitiesClientInterface
     }
 
     /** @return list<array<string, mixed>> */
-    private function resources(mixed $resources): array
+    private function resources(mixed $resources, string $identityField): array
     {
         $result = [];
         foreach ($this->iterable($resources) as $resource) {
-            $result[] = $this->resourceData($resource);
+            $data = $this->resourceData($resource);
+            if ((! is_int($data['id'] ?? null) && ! is_string($data['id'] ?? null))
+                || filter_var($data['id'], FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) === false
+                || ! is_string($data[$identityField] ?? null) || trim($data[$identityField]) === '') {
+                throw new RuntimeException('Forge returned a resource without a valid reconciliation identity.');
+            }
+            $result[] = $data;
         }
 
         return $result;
