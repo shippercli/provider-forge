@@ -87,6 +87,42 @@ it('requires exact-scope consent before reusing an unmarked Forge database', fun
 ]);
 
 
+it('refuses configured connection values that would replace stored credentials for an existing database', function (): void {
+    $client = $this->createMock(ForgeCapabilitiesClientInterface::class);
+    $client->method('serverDatabaseType')->willReturn('mysql84');
+    $client->method('databases')->willReturn([['id' => 21, 'name' => 'main']]);
+    $client->method('environment')->willReturn(
+        "DB_HOST=127.0.0.1\nDB_DATABASE=main\nDB_USERNAME=api_production_main\nDB_PASSWORD=retained-secret",
+    );
+    $client->expects($this->never())->method('updateEnvironment');
+    $profile = new class {
+        public function name(): string { return 'production'; }
+        public function environment(): object {
+            return new class {
+                public function variables(): array { return ['DB_PASSWORD' => 'replacement-secret']; }
+            };
+        }
+        public function get(string $key): mixed {
+            return $key === 'forge'
+                ? ['adopt_existing_databases' => [['project' => 'api', 'profile' => 'production', 'name' => 'main']]]
+                : null;
+        }
+    };
+    $provider = new ForgeProvider(['server_id' => 7, 'database_environment_prefixes' => ['main' => 'DB', 'analytics' => 'ANALYTICS_DB']]);
+
+    $error = null;
+    try {
+        (new ReflectionMethod($provider, 'applyDatabases'))
+            ->invoke($provider, $client, forgeDatabaseProject(), $profile, '55');
+    } catch (RuntimeException $exception) {
+        $error = $exception;
+    }
+
+    expect($error)->toBeInstanceOf(RuntimeException::class)
+        ->and($error?->getMessage())->toContain('conflicting configured connection settings')
+        ->and($error?->getMessage())->not->toContain('retained-secret', 'replacement-secret');
+});
+
 it('rejects Forge database names that collide after interpolation before API access', function (): void {
     $project = new class {
         public function name(): string { return 'api'; }

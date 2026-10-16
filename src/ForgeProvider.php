@@ -488,11 +488,20 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
             if ($this->resourceByName($existing, $name) !== null) {
                 try {
                     $storedEnvironment = $this->parseCompleteEnvironment($client->environment($this->getServerId(), $siteId));
-                    $available = [...$storedEnvironment, ...$this->configuredEnvironment($project, $profile)];
+                    $configuredEnvironment = $this->configuredEnvironment($project, $profile);
                 } catch (\Throwable) {
                     throw new RuntimeException('Cannot read or parse the Forge site environment before reusing an existing database.');
                 }
                 $prefix = $prefixes[$database->name()];
+                foreach (['_HOST', '_DATABASE', '_USERNAME', '_PASSWORD'] as $suffix) {
+                    $key = $prefix.$suffix;
+                    if (array_key_exists($key, $storedEnvironment)
+                        && array_key_exists($key, $configuredEnvironment)
+                        && $storedEnvironment[$key] !== $configuredEnvironment[$key]) {
+                        throw new RuntimeException("Existing Forge database {$name} has conflicting configured connection settings; preserving the stored credentials.");
+                    }
+                }
+                $available = [...$storedEnvironment, ...$configuredEnvironment];
                 if (($available[$prefix.'_DATABASE'] ?? null) !== $name
                     || ($available[$prefix.'_USERNAME'] ?? null) !== $username
                     || ! is_string($available[$prefix.'_HOST'] ?? null) || $available[$prefix.'_HOST'] === ''
