@@ -53,6 +53,11 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
     public function validate(object $project, object $profile): array
     {
         $errors = [];
+        try {
+            $this->databaseEnvironmentPrefixes($project);
+        } catch (\InvalidArgumentException $exception) {
+            $errors[] = $exception->getMessage();
+        }
 
         if (! isset($this->config['api_token']) || $this->config['api_token'] === '') {
             $errors[] = 'Forge API token is required';
@@ -341,6 +346,7 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
             return;
         }
 
+        $prefixes = $this->databaseEnvironmentPrefixes($project);
         $existing = $client->databases($this->getServerId());
         foreach ($project->databases() as $database) {
             if (! method_exists($database, 'name')) {
@@ -353,18 +359,46 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
             $payload = [
                 'name' => $name,
                 'type' => method_exists($database, 'type') ? $database->type() : 'mysql',
-                'user' => method_exists($database, 'user') ? $database->user() : $name,
+                'user' => method_exists($database, 'user') ? $this->interpolateDatabaseName($database->user(), $this->projectName($project), $this->profileName($profile)) : $name,
                 'password' => (string) ($this->config['database_password'] ?? bin2hex(random_bytes(16))),
             ];
             $client->createDatabase($this->getServerId(), $payload);
-            if ($this->generatedEnvironment === []) {
-                $this->generatedEnvironment = [
-                    'DB_DATABASE' => $name,
-                    'DB_USERNAME' => (string) $payload['user'],
-                    'DB_PASSWORD' => (string) $payload['password'],
-                ];
-            }
+            $prefix = $prefixes[$database->name()];
+            $this->generatedEnvironment = [...$this->generatedEnvironment,
+                $prefix.'_HOST' => (string) ($this->config['database_host'] ?? '127.0.0.1'),
+                $prefix.'_DATABASE' => $name,
+                $prefix.'_USERNAME' => (string) $payload['user'],
+                $prefix.'_PASSWORD' => (string) $payload['password'],
+            ];
         }
+    }
+
+    /** @return array<string, string> */
+    private function databaseEnvironmentPrefixes(object $project): array
+    {
+        $databases = method_exists($project, 'databases')
+            ? $project->databases() : [];
+        $configured = $this->config['database_environment_prefixes'] ?? [];
+        if (! \is_array($configured)) {
+            throw new \InvalidArgumentException('Forge database_environment_prefixes must be a map of database names to environment prefixes.');
+        }
+        $prefixes = [];
+        foreach ($databases as $database) {
+            if (! \is_object($database) || ! \method_exists($database, 'name')) {
+                throw new \InvalidArgumentException('Forge database declarations require a name.');
+            }
+            $name = $database->name();
+            $prefix = $configured[$name] ?? (\count($databases) === 1 ? 'DB' : null);
+            if (! \is_string($prefix) || \preg_match('/\A[A-Z_][A-Z0-9_]*\z/', $prefix) !== 1) {
+                throw new \InvalidArgumentException("Forge database {$name} requires a valid database_environment_prefixes entry when multiple databases are declared.");
+            }
+            if (isset($prefixes[$name]) || \in_array($prefix, $prefixes, true)) {
+                throw new \InvalidArgumentException('Forge database names and environment prefixes must be unique.');
+            }
+            $prefixes[$name] = $prefix;
+        }
+
+        return $prefixes;
     }
 
     private function applyEnvironment(ForgeCapabilitiesClientInterface $client, object $project, object $profile, string $serverId, string $siteId): void
