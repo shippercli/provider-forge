@@ -265,3 +265,19 @@ foreach (['valid', 'ignored'] as $mode) {
     }
 }
 echo "Real HTTP environment persistence readback controls passed\n";
+
+
+foreach (['missing', 'attributes', 'null', 'number', 'false', 'errors', 'valid'] as $case) {
+    $sdk = new ForgeInventoryClient('synthetic-authorization-secret', new Client(['base_uri' => $argv[1].'/',
+        'headers' => ['X-Fixture-Case' => 'raw-env-'.$case, 'Authorization' => 'Bearer synthetic-authorization-secret']]));
+    $failure = null;
+    $content = null;
+    try { $content = $sdk->siteEnvironment('org', 7, 55); }
+    catch (RuntimeException $error) { $failure = $error; }
+    if ($case === 'valid') {
+        if ($failure !== null || $content !== '') throw new RuntimeException('Explicit empty environment rejected');
+    } elseif ($failure?->getMessage() !== 'Forge returned an invalid site environment envelope.' || $failure->getPrevious() !== null) {
+        throw new RuntimeException('Unreadable environment accepted or leaked diagnostics');
+    }
+}
+echo "Seven raw environment envelope real HTTP controls passed\n";

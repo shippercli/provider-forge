@@ -29,3 +29,23 @@ it('requires persisted Forge environment values after an acknowledged write', fu
         expect($failure->getMessage())->not->toContain('literal-${PROJECT_NAME}-secret');
     }
 })->with(['ignored', 'unreadable', 'valid']);
+
+it('rejects unreadable raw environment envelopes before SDK empty defaults', function (string $body): void {
+    $sdk = new ForgeInventoryClient('token', new Client(['handler' => HandlerStack::create(new MockHandler([
+        new Response(200, [], $body),
+    ]))]));
+    expect(fn () => $sdk->siteEnvironment('org', 7, 55))
+        ->toThrow(RuntimeException::class, 'Forge returned an invalid site environment envelope.');
+})->with([
+    '{}', '{"data":{"attributes":{}}}', '{"data":{"attributes":{"content":null}}}',
+    '{"data":{"attributes":{"content":123}}}',
+    '{"success":false,"data":{"attributes":{"content":""}}}',
+    '{"errors":["synthetic-secret"],"data":{"attributes":{"content":""}}}',
+]);
+
+it('preserves explicitly empty site environment content', function (): void {
+    $sdk = new ForgeInventoryClient('token', new Client(['handler' => HandlerStack::create(new MockHandler([
+        new Response(200, [], '{"data":{"attributes":{"content":""}}}'),
+    ]))]));
+    expect($sdk->siteEnvironment('org', 7, 55))->toBe('');
+});

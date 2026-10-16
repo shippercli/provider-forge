@@ -34,6 +34,16 @@ final class ForgeInventoryClient extends Forge
             return $this->handleRequestError($safe);
         }
         $body = (string) $response->getBody();
+        if (\strtoupper($verb) === 'GET'
+            && \preg_match('#\Aorgs/[^/]+/servers/[0-9]+/sites/[0-9]+/environment\z#', $uri) === 1) {
+            $shape = \json_decode($body);
+            if (! $shape instanceof \stdClass || ! \is_string($shape->data->attributes->content ?? null)
+                || ($shape->errors ?? []) !== []
+                || ! \in_array($shape->error ?? null, [null, '', false], true)
+                || (\property_exists($shape, 'success') && $shape->success !== true)) {
+                throw new RuntimeException('Forge returned an invalid site environment envelope.');
+            }
+        }
         if (\strtoupper($verb) === 'GET' && $this->isInventoryUri($uri)) {
             $shape = \json_decode($body);
             if (! $shape instanceof \stdClass || ! \is_array($shape->data ?? null)
