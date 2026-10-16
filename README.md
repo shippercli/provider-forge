@@ -81,6 +81,22 @@ credentials must already be available in the existing site environment or its
 configured overrides. Reuse requires a matching database name and username, a
 host, and a nonempty password. Missing, mismatched, or malformed connection
 settings block deployment without creating a database or rotating its password.
+New database connections receive a `SHIPPERCLI_DATABASE_<HASH>` lifecycle marker
+scoped to the exact project, profile, and resolved database name. An existing
+database without matching lifecycle evidence requires an exact profile opt-in:
+
+```yaml
+forge:
+  adopt_existing_databases:
+    - project: api
+      profile: production
+      name: api_production
+```
+
+The read-only plan names each adoption. The marker is persisted in the site
+environment after apply confirms the existing database credentials. Forge does
+not expose a safe database-to-site ownership association for automatic cleanup;
+the provider therefore preserves databases on destroy, including adopted ones.
 
 ## License
 

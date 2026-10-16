@@ -121,11 +121,35 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
         if (method_exists($project, 'databases')) {
             $databases = $project->databases();
             if (! empty($databases)) {
+                $existing = $this->forgeCapabilitiesClient()->databases($serverId);
+                $environment = $site === null ? [] : $this->parseCompleteEnvironment($this->forgeCapabilitiesClient()->environment($serverId, (string) $this->siteId($site)));
                 foreach ($databases as $database) {
-                    $dbName = $this->interpolateDatabaseName($database->name(), $projectName, $profileName);
-                    $actions[] = "Create database: {$dbName}";
+                    $declaredName = $database->name();
+                    $dbName = $this->interpolateDatabaseName($declaredName, $projectName, $profileName);
+                    if ($this->resourceByName($existing, $dbName) === null) {
+                        $actions[] = "Create database: {$dbName}";
+                    } elseif ($this->hasDatabaseOwnership($environment, $project, $profile, $dbName, 'created')) {
+                        $actions[] = "Reuse Shipper-created database: {$dbName}";
+                    } elseif ($this->hasDatabaseOwnership($environment, $project, $profile, $dbName, 'adopted')) {
+                        $actions[] = "Reuse adopted database: {$dbName}";
+                    } elseif ($this->databaseAdoptionAuthorized($project, $profile, $dbName)) {
+                        $actions[] = "Adopt existing Forge database: {$dbName}";
+                    } else {
+                        $blocked = 'An existing Forge database requires exact-scope adoption consent.';
+                    }
                 }
             }
+        }
+
+        if ($blocked !== null) {
+            return [
+                'provider' => $this->getName(), 'project' => $projectName,
+                'profile' => $profileName, 'branch' => $branch,
+                'server_id' => $serverId, 'domain' => $domain,
+                'blocked' => true,
+                'actions' => ['BLOCKED: '.$blocked],
+                'note' => 'No deployment actions are authorized by this plan.',
+            ];
         }
 
         if (method_exists($project, 'environment') || method_exists($profile, 'environment')) {
@@ -463,7 +487,8 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
             $username = method_exists($database, 'user') ? $this->interpolateDatabaseName($database->user(), $this->projectName($project), $this->profileName($profile)) : $name;
             if ($this->resourceByName($existing, $name) !== null) {
                 try {
-                    $available = [...$this->parseCompleteEnvironment($client->environment($this->getServerId(), $siteId)), ...$this->configuredEnvironment($project, $profile)];
+                    $storedEnvironment = $this->parseCompleteEnvironment($client->environment($this->getServerId(), $siteId));
+                    $available = [...$storedEnvironment, ...$this->configuredEnvironment($project, $profile)];
                 } catch (\Throwable) {
                     throw new RuntimeException('Cannot read or parse the Forge site environment before reusing an existing database.');
                 }
@@ -473,6 +498,17 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
                     || ! is_string($available[$prefix.'_HOST'] ?? null) || $available[$prefix.'_HOST'] === ''
                     || ! is_string($available[$prefix.'_PASSWORD'] ?? null) || $available[$prefix.'_PASSWORD'] === '') {
                     throw new RuntimeException("Existing Forge database {$name} requires matching {$prefix} connection settings and a password in the application environment.");
+                }
+                if ($siteId !== '') {
+                    if ($this->hasDatabaseOwnership($storedEnvironment, $project, $profile, $name, 'created')
+                        || $this->hasDatabaseOwnership($storedEnvironment, $project, $profile, $name, 'adopted')) {
+                        continue;
+                    }
+                    if (! $this->databaseAdoptionAuthorized($project, $profile, $name)) {
+                        throw new RuntimeException("Existing Forge database {$name} requires exact-scope adoption consent.");
+                    }
+                    $this->generatedEnvironment[$this->databaseOwnershipKey($name)] = 'adopted:'.$this->databaseOwnershipMarker($project, $profile, $name);
+                    $client->updateEnvironment($this->getServerId(), $siteId, $this->generatedEnvironment);
                 }
                 continue;
             }
@@ -492,15 +528,47 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
             }
             $prefix = $prefixes[$database->name()];
             $this->generatedEnvironment = [...$this->generatedEnvironment,
+                $this->databaseOwnershipKey($name) => 'created:'.$this->databaseOwnershipMarker($project, $profile, $name),
                 $prefix.'_HOST' => (string) ($this->config['database_host'] ?? '127.0.0.1'),
                 $prefix.'_DATABASE' => $name,
                 $prefix.'_USERNAME' => (string) $payload['user'],
                 $prefix.'_PASSWORD' => (string) $payload['password'],
             ];
             if ($siteId !== '') {
+                $existing[] = ['name' => $name];
                 $client->updateEnvironment($this->getServerId(), $siteId, $this->generatedEnvironment);
             }
         }
+    }
+
+    private function databaseOwnershipKey(string $name): string
+    {
+        return 'SHIPPERCLI_DATABASE_'.strtoupper(substr(hash('sha256', $name), 0, 24));
+    }
+
+    private function databaseOwnershipMarker(object $project, object $profile, string $name): string
+    {
+        return hash('sha256', json_encode([$this->projectName($project), $this->profileName($profile), $name], JSON_THROW_ON_ERROR));
+    }
+
+    private function hasDatabaseOwnership(array $environment, object $project, object $profile, string $name, string $state): bool
+    {
+        return ($environment[$this->databaseOwnershipKey($name)] ?? null) === $state.':'.$this->databaseOwnershipMarker($project, $profile, $name);
+    }
+
+    private function databaseAdoptionAuthorized(object $project, object $profile, string $name): bool
+    {
+        $ploi = $this->profileValue($profile, 'forge');
+        $entries = is_array($ploi) ? ($ploi['adopt_existing_databases'] ?? []) : [];
+        if (! is_array($entries)) throw new \InvalidArgumentException('Forge adopt_existing_databases must list exact project/profile/name identities.');
+        foreach ($entries as $entry) {
+            if (! is_array($entry) || array_diff(array_keys($entry), ['project', 'profile', 'name']) !== []
+                || ! is_string($entry['project'] ?? null) || ! is_string($entry['profile'] ?? null) || ! is_string($entry['name'] ?? null)) {
+                throw new \InvalidArgumentException('Forge adoption entries require string project, profile, and name fields only.');
+            }
+            if ($entry['project'] === $this->projectName($project) && $entry['profile'] === $this->profileName($profile) && $entry['name'] === $name) return true;
+        }
+        return false;
     }
 
     /** @return array<string, string> */

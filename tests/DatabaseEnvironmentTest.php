@@ -46,33 +46,44 @@ it('rejects ambiguous Forge database mappings before provider calls', function (
     (new ReflectionMethod($provider, 'applyDatabases'))->invoke($provider, $client, forgeDatabaseProject(), new stdClass);
 })->with([[[]], [['main' => 'DB', 'analytics' => 'DB']], [['main' => 'DB', 'analytics' => "BAD\nKEY"]]])->throws(InvalidArgumentException::class);
 
-it('requires existing Forge database credentials without creating or rotating databases', function (string $content, bool $valid): void {
+it('requires exact-scope consent before reusing an unmarked Forge database', function (string $content, bool $consent, bool $valid): void {
     $client = $this->createMock(ForgeCapabilitiesClientInterface::class);
     $client->method('serverDatabaseType')->willReturn('mysql84');
     $client->expects($this->once())->method('databases')->willReturn([['name' => 'main']]);
-    $client->expects($this->once())->method('environment')->with('7', '55')->willReturn($content);
+    $stored = $content;
+    $client->expects($this->once())->method('environment')->with('7', '55')->willReturnCallback(static function () use (&$stored): string { return $stored; });
+    if ($consent && $valid) $client->expects($this->once())->method('updateEnvironment')->with('7', '55', $this->anything())->willReturnCallback(function ($server, $site, $values) use (&$stored): void { $stored .= "\n".implode("\n", array_map(static fn ($key, $value) => $key.'='.$value, array_keys($values), $values)); });
+    else $client->expects($this->never())->method('updateEnvironment');
     $client->expects($this->never())->method('createDatabase');
     $project = new class {
+        public function name(): string { return 'api'; }
         public function databases(): array { return [new class {
             public function name(): string { return 'main'; }
             public function user(): string { return 'api'; }
         }]; }
     };
+    $profile = new class($consent) {
+        public function __construct(private bool $consent) {}
+        public function name(): string { return 'production'; }
+        public function get(string $key): mixed { return $key === 'forge' && $this->consent ? ['adopt_existing_databases' => [['project' => 'api', 'profile' => 'production', 'name' => 'main']]] : null; }
+    };
     $provider = new ForgeProvider(['server_id' => 7]);
     $failure = null;
     try {
-        (new ReflectionMethod($provider, 'applyDatabases'))->invoke($provider, $client, $project, new stdClass, '55');
+        (new ReflectionMethod($provider, 'applyDatabases'))->invoke($provider, $client, $project, $profile, '55');
     } catch (RuntimeException $exception) { $failure = $exception; }
-    expect($failure === null)->toBe($valid);
+    expect($failure === null)->toBe($valid)
+        ->and($consent && $valid ? $stored : '')->toContain($consent && $valid ? 'adopted:' : '');
     if ($failure !== null) expect($failure->getMessage())->not->toContain('retained-secret');
-    expect((new ReflectionProperty($provider, 'generatedEnvironment'))->getValue($provider))->toBe([]);
+    expect((new ReflectionProperty($provider, 'generatedEnvironment'))->getValue($provider))->toBe($consent && $valid ? ['SHIPPERCLI_DATABASE_'.strtoupper(substr(hash('sha256', 'main'), 0, 24)) => 'adopted:'.hash('sha256', json_encode(['api', 'production', 'main'], JSON_THROW_ON_ERROR))] : []);
 })->with([
-    ["DB_HOST=127.0.0.1\nDB_DATABASE=main\nDB_USERNAME=api\nDB_PASSWORD='retained-secret'", true],
-    ["DB_HOST=127.0.0.1\nDB_DATABASE=main\nDB_USERNAME=api", false],
-    ["DB_HOST=127.0.0.1\nDB_DATABASE=other\nDB_USERNAME=api\nDB_PASSWORD=retained-secret", false],
-    ["DB_HOST=127.0.0.1\nDB_DATABASE=main\nDB_USERNAME=api\nDB_PASSWORD=\"line one\nline two\"", true],
-    ["DB_PASSWORD=\"unterminated", false],
-    ["DB_HOST=127.0.0.1\nDB_DATABASE=main\nDB_USERNAME=api\nDB_PASSWORD=retained-secret\nBROKEN=\"unfinished", false],
+    ["DB_HOST=127.0.0.1\nDB_DATABASE=main\nDB_USERNAME=api\nDB_PASSWORD='retained-secret'", false, false],
+    ["DB_HOST=127.0.0.1\nDB_DATABASE=main\nDB_USERNAME=api\nDB_PASSWORD='retained-secret'", true, true],
+    ["DB_HOST=127.0.0.1\nDB_DATABASE=main\nDB_USERNAME=api", true, false],
+    ["DB_HOST=127.0.0.1\nDB_DATABASE=other\nDB_USERNAME=api\nDB_PASSWORD=retained-secret", true, false],
+    ["DB_HOST=127.0.0.1\nDB_DATABASE=main\nDB_USERNAME=api\nDB_PASSWORD=\"line one\nline two\"", true, true],
+    ["DB_PASSWORD=\"unterminated", true, false],
+    ["DB_HOST=127.0.0.1\nDB_DATABASE=main\nDB_USERNAME=api\nDB_PASSWORD=retained-secret\nBROKEN=\"unfinished", true, false],
 ]);
 
 
@@ -227,8 +238,10 @@ it('delivers a confirmed Forge connection before provisioning later databases', 
     $retry = $this->createMock(ForgeCapabilitiesClientInterface::class);
     $retry->method('serverDatabaseType')->willReturn('mysql84');
     $retry->method('databases')->willReturn([['id' => 21, 'name' => 'main']]);
+    $ownershipKey = 'SHIPPERCLI_DATABASE_'.strtoupper(substr(hash('sha256', 'main'), 0, 24));
+    $ownershipMarker = hash('sha256', json_encode(['api', 'production', 'main'], JSON_THROW_ON_ERROR));
     $retry->expects($this->once())->method('environment')->with('7', '55')->willReturn(
-        "DB_HOST=127.0.0.1\nDB_DATABASE=main\nDB_USERNAME=api_profile_main\nDB_PASSWORD=".$password,
+        "DB_HOST=127.0.0.1\nDB_DATABASE=main\nDB_USERNAME=api_production_main\nDB_PASSWORD=".$password."\n".$ownershipKey.'=created:'.$ownershipMarker,
     );
     $retry->expects($this->once())->method('createDatabase')->willReturnCallback(function ($server, $payload): array {
         expect($payload['name'])->toBe('analytics');
@@ -238,7 +251,11 @@ it('delivers a confirmed Forge connection before provisioning later databases', 
         $persisted = [...$persisted, ...$values];
     });
     $retryProvider = new ForgeProvider(['server_id' => 7, 'database_environment_prefixes' => ['main' => 'DB', 'analytics' => 'ANALYTICS_DB']]);
-    (new ReflectionMethod($retryProvider, 'applyDatabases'))->invoke($retryProvider, $retry, forgeDatabaseProject(), new stdClass, '55');
+    $retryProfile = new class {
+        public function name(): string { return 'production'; }
+        public function get(string $key): mixed { return $key === 'forge' ? ['adopt_existing_databases' => [['project' => 'api', 'profile' => 'production', 'name' => 'analytics']]] : null; }
+    };
+    (new ReflectionMethod($retryProvider, 'applyDatabases'))->invoke($retryProvider, $retry, forgeDatabaseProject(), $retryProfile, '55');
     expect($persisted['DB_PASSWORD'])->toBe($password)->and($persisted['ANALYTICS_DB_DATABASE'])->toBe('analytics');
 });
 
