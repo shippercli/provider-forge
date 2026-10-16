@@ -179,3 +179,11 @@ a valid ID alone is insufficient. Rejection does not delete the returned site
 or automatically retry creation. Inspect the account before retrying because
 the original request may have created a resource. Domain confirmation does not
 prove all settings, ownership tags, provisioning completion or public serving.
+
+### Complete environment input
+
+Existing application environments must parse completely before their database
+credentials are trusted. An unfinished double-quoted value at the end of the
+file is rejected even if valid credentials appear earlier; phpdotenv otherwise
+silently drops that unfinished value. Complete multiline passwords remain
+supported. The internal completeness probe is removed from parsed values.

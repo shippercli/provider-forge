@@ -56,18 +56,20 @@ it('requires existing Forge database credentials without creating or rotating da
         }]; }
     };
     $provider = new ForgeProvider(['server_id' => 7]);
+    $failure = null;
     try {
         (new ReflectionMethod($provider, 'applyDatabases'))->invoke($provider, $client, $project, new stdClass, '55');
-        expect($valid)->toBeTrue();
-    } catch (RuntimeException $exception) {
-        expect($valid)->toBeFalse()->and($exception->getMessage())->not->toContain('retained-secret');
-    }
+    } catch (RuntimeException $exception) { $failure = $exception; }
+    expect($failure === null)->toBe($valid);
+    if ($failure !== null) expect($failure->getMessage())->not->toContain('retained-secret');
     expect((new ReflectionProperty($provider, 'generatedEnvironment'))->getValue($provider))->toBe([]);
 })->with([
     ["DB_HOST=127.0.0.1\nDB_DATABASE=main\nDB_USERNAME=api\nDB_PASSWORD='retained-secret'", true],
     ["DB_HOST=127.0.0.1\nDB_DATABASE=main\nDB_USERNAME=api", false],
     ["DB_HOST=127.0.0.1\nDB_DATABASE=other\nDB_USERNAME=api\nDB_PASSWORD=retained-secret", false],
+    ["DB_HOST=127.0.0.1\nDB_DATABASE=main\nDB_USERNAME=api\nDB_PASSWORD=\"line one\nline two\"", true],
     ["DB_PASSWORD=\"unterminated", false],
+    ["DB_HOST=127.0.0.1\nDB_DATABASE=main\nDB_USERNAME=api\nDB_PASSWORD=retained-secret\nBROKEN=\"unfinished", false],
 ]);
 
 

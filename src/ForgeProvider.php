@@ -371,6 +371,18 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
         $this->applySsl($client, $project, $serverId, $siteId, $domain);
     }
 
+    /** @return array<string, mixed> */
+    private function parseCompleteEnvironment(string $content): array
+    {
+        $probe = '__SHIPPER_ENV_END_'.\bin2hex(\random_bytes(16));
+        $values = \Dotenv\Dotenv::parse($content."\n".$probe."=1\n");
+        if (($values[$probe] ?? null) !== '1') {
+            throw new \RuntimeException('Application environment input is incomplete.');
+        }
+        unset($values[$probe]);
+        return $values;
+    }
+
     /** @return array<string, string> */
     private function configuredDatabasePasswords(object $project, object $profile): array
     {
@@ -406,7 +418,7 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
             $username = method_exists($database, 'user') ? $this->interpolateDatabaseName($database->user(), $this->projectName($project), $this->profileName($profile)) : $name;
             if ($this->resourceByName($existing, $name) !== null) {
                 try {
-                    $available = [...\Dotenv\Dotenv::parse($client->environment($this->getServerId(), $siteId)), ...$this->configuredEnvironment($project, $profile)];
+                    $available = [...$this->parseCompleteEnvironment($client->environment($this->getServerId(), $siteId)), ...$this->configuredEnvironment($project, $profile)];
                 } catch (\Throwable) {
                     throw new RuntimeException('Cannot read or parse the Forge site environment before reusing an existing database.');
                 }
