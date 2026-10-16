@@ -118,3 +118,16 @@ class map. Dependency classes come from the installed checkout; this check does
 not perform a fresh production dependency install or live deployment. CI runs it
 with the existing provider tests. Git export verification uses current worktree
 attributes; committed attributes determine subsequent GitHub source archives.
+
+### Inventory JSON shape checks
+
+The protected collection endpoints validate JSON before associative-array
+normalization: the envelope must be an object, `data` an array, and each record
+an object. Explicit error fields or an unsuccessful `success` flag reject the
+read. If supplied, `meta` must be an object and `next_cursor` either null or a
+nonempty trimmed string. This preserves the distinction between `data: []`
+(valid empty inventory) and `data: {}` (invalid shape). Missing optional metadata
+remains supported. The guard applies to site, database, background-process,
+scheduled-job and domain collections; plaintext responses outside those
+endpoints retain their existing behavior. Diagnostics never echo the API error
+payload. These checks do not establish a remote snapshot or live compatibility.

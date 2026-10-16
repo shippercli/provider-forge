@@ -20,7 +20,17 @@ class ResponsesTest(unittest.TestCase):
                 body = self.rfile.read(int(self.headers.get('Content-Length', '0')))
                 received.append((self.path, self.headers.get('Authorization'), body))
                 procedure = self.path.rsplit('/', 1)[-1]
-                if procedure.startswith('status-'):
+                if self.path.startswith('/orgs/org/servers/7/sites'):
+                    case = self.headers['X-Fixture-Case']
+                    secret = self.headers.get('Authorization', '')
+                    shapes = {'object': {'data': {}}, 'numeric-object': {'data': {'0': {'id': '1'}}},
+                        'array-record': {'data': [[]]}, 'errors': {'data': [], 'errors': [secret]},
+                        'error': {'data': [], 'error': secret}, 'false': {'data': [], 'success': False},
+                        'meta-array': {'data': [], 'meta': []}, 'cursor-number': {'data': [], 'meta': {'next_cursor': 42}},
+                        'cursor-empty': {'data': [], 'meta': {'next_cursor': ''}},
+                        'valid': {'data': [], 'meta': {'next_cursor': None}}, 'valid-no-meta': {'data': []}}
+                    status, payload = 200, json.dumps(shapes[case]).encode()
+                elif procedure.startswith('status-'):
                     _, status, format_ = procedure.split('-')
                     status = int(status)
                     echoed = self.headers.get('Authorization', '') + body.decode() + 'synthetic-error-secret'
@@ -47,7 +57,7 @@ class ResponsesTest(unittest.TestCase):
                 result = subprocess.run(['php', str(Path(__file__).with_name('verify-responses.php')), f'http://127.0.0.1:{server.server_port}'], capture_output=True, text=True, timeout=15)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertEqual(redirected, [])
-                self.assertEqual(len(received), 54)
+                self.assertEqual(len(received), 65)
                 self.assertTrue(all(auth == 'Bearer synthetic-authorization-secret' for _, auth, _ in received))
                 self.assertEqual(sum(b'synthetic-body-secret' in body for _, _, body in received), 26)
             finally:

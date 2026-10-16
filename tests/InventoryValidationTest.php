@@ -68,3 +68,21 @@ it('accepts explicit empty collections and valid site identities', function (): 
     $data = (new ReflectionMethod($client, 'siteData'))->invoke($client, (object) ['id' => 12, 'name' => 'example.test']);
     expect($data['id'])->toBe(12)->and($data['name'])->toBe('example.test');
 });
+
+it('rejects JSON shape loss and contradictory inventory errors before SDK normalization', function (string $body): void {
+    $http = new Client(['handler' => HandlerStack::create(new MockHandler([new Response(200, [], $body)]))]);
+    $sdk = new ForgeInventoryClient('token', $http);
+    expect(fn () => iterator_to_array($sdk->serverSites('org', 7)->lazy()))
+        ->toThrow(RuntimeException::class, 'invalid resource inventory envelope');
+})->with([
+    '{"data":{}}', '{"data":{"0":{"id":"1"}}}', '{"data":[[]]}',
+    '{"data":[],"errors":["synthetic-secret"]}', '{"data":[],"error":"synthetic-secret"}',
+    '{"data":[],"success":false}', '{"data":[],"meta":[]}',
+    '{"data":[],"meta":{"next_cursor":42}}', '{"data":[],"meta":{"next_cursor":""}}',
+]);
+
+it('preserves plaintext responses outside protected inventory endpoints', function (): void {
+    $http = new Client(['handler' => HandlerStack::create(new MockHandler([new Response(200, [], 'server configuration text')]))]);
+    $sdk = new ForgeInventoryClient('token', $http);
+    expect($sdk->get('fixture/plaintext'))->toBe('server configuration text');
+});
