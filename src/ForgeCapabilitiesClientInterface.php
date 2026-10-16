@@ -14,6 +14,8 @@ interface ForgeCapabilitiesClientInterface extends ForgeClientInterface
 
     public function deleteDatabase(string $serverId, string $databaseId): void;
 
+    public function environment(string $serverId, string $siteId): string;
+
     /** @param array<string, string> $variables */
     public function updateEnvironment(string $serverId, string $siteId, array $variables): void;
 

@@ -43,3 +43,29 @@ it('rejects ambiguous Forge database mappings before provider calls', function (
     $provider = new ForgeProvider(['server_id' => 7, 'database_environment_prefixes' => $prefixes]);
     (new ReflectionMethod($provider, 'applyDatabases'))->invoke($provider, $client, forgeDatabaseProject(), new stdClass);
 })->with([[[]], [['main' => 'DB', 'analytics' => 'DB']], [['main' => 'DB', 'analytics' => "BAD\nKEY"]]])->throws(InvalidArgumentException::class);
+
+it('requires existing Forge database credentials without creating or rotating databases', function (string $content, bool $valid): void {
+    $client = $this->createMock(ForgeCapabilitiesClientInterface::class);
+    $client->expects($this->once())->method('databases')->willReturn([['name' => 'main']]);
+    $client->expects($this->once())->method('environment')->with('7', '55')->willReturn($content);
+    $client->expects($this->never())->method('createDatabase');
+    $project = new class {
+        public function databases(): array { return [new class {
+            public function name(): string { return 'main'; }
+            public function user(): string { return 'api'; }
+        }]; }
+    };
+    $provider = new ForgeProvider(['server_id' => 7]);
+    try {
+        (new ReflectionMethod($provider, 'applyDatabases'))->invoke($provider, $client, $project, new stdClass, '55');
+        expect($valid)->toBeTrue();
+    } catch (RuntimeException $exception) {
+        expect($valid)->toBeFalse()->and($exception->getMessage())->not->toContain('retained-secret');
+    }
+    expect((new ReflectionProperty($provider, 'generatedEnvironment'))->getValue($provider))->toBe([]);
+})->with([
+    ["DB_HOST=127.0.0.1\nDB_DATABASE=main\nDB_USERNAME=api\nDB_PASSWORD='retained-secret'", true],
+    ["DB_HOST=127.0.0.1\nDB_DATABASE=main\nDB_USERNAME=api", false],
+    ["DB_HOST=127.0.0.1\nDB_DATABASE=other\nDB_USERNAME=api\nDB_PASSWORD=retained-secret", false],
+    ["DB_PASSWORD=\"unterminated", false],
+]);

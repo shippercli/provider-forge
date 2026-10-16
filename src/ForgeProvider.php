@@ -333,14 +333,14 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
             return;
         }
         $client = $this->forgeCapabilitiesClient();
-        $this->applyDatabases($client, $project, $profile);
+        $this->applyDatabases($client, $project, $profile, $siteId);
         $this->applyEnvironment($client, $project, $profile, $serverId, $siteId);
         $this->applyQueues($client, $project, $serverId);
         $this->applyCron($client, $project, $serverId);
         $this->applySsl($client, $project, $serverId, $siteId, $domain);
     }
 
-    private function applyDatabases(ForgeCapabilitiesClientInterface $client, object $project, object $profile): void
+    private function applyDatabases(ForgeCapabilitiesClientInterface $client, object $project, object $profile, string $siteId = ''): void
     {
         if (! method_exists($project, 'databases')) {
             return;
@@ -353,13 +353,26 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
                 continue;
             }
             $name = $this->interpolateDatabaseName($database->name(), $this->projectName($project), $this->profileName($profile));
+            $username = method_exists($database, 'user') ? $this->interpolateDatabaseName($database->user(), $this->projectName($project), $this->profileName($profile)) : $name;
             if ($this->resourceByName($existing, $name) !== null) {
+                try {
+                    $available = [...\Dotenv\Dotenv::parse($client->environment($this->getServerId(), $siteId)), ...$this->configuredEnvironment($project, $profile)];
+                } catch (\Throwable) {
+                    throw new RuntimeException('Cannot read or parse the Forge site environment before reusing an existing database.');
+                }
+                $prefix = $prefixes[$database->name()];
+                if (($available[$prefix.'_DATABASE'] ?? null) !== $name
+                    || ($available[$prefix.'_USERNAME'] ?? null) !== $username
+                    || ! is_string($available[$prefix.'_HOST'] ?? null) || $available[$prefix.'_HOST'] === ''
+                    || ! is_string($available[$prefix.'_PASSWORD'] ?? null) || $available[$prefix.'_PASSWORD'] === '') {
+                    throw new RuntimeException("Existing Forge database {$name} requires matching {$prefix} connection settings and a password in the application environment.");
+                }
                 continue;
             }
             $payload = [
                 'name' => $name,
                 'type' => method_exists($database, 'type') ? $database->type() : 'mysql',
-                'user' => method_exists($database, 'user') ? $this->interpolateDatabaseName($database->user(), $this->projectName($project), $this->profileName($profile)) : $name,
+                'user' => $username,
                 'password' => (string) ($this->config['database_password'] ?? bin2hex(random_bytes(16))),
             ];
             $client->createDatabase($this->getServerId(), $payload);
@@ -403,19 +416,26 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
 
     private function applyEnvironment(ForgeCapabilitiesClientInterface $client, object $project, object $profile, string $serverId, string $siteId): void
     {
-        $variables = [];
-        foreach ([$project, $profile] as $source) {
-            if (method_exists($source, 'environment')) {
-                $environment = $source->environment();
-                if (method_exists($environment, 'variables')) {
-                    $variables = array_merge($variables, $environment->variables());
-                }
-            }
-        }
+        $variables = $this->configuredEnvironment($project, $profile);
         $variables = [...$variables, ...$this->generatedEnvironment];
         if ($variables !== []) {
             $client->updateEnvironment($serverId, $siteId, $variables);
         }
+    }
+
+    /** @return array<string, string> */
+    private function configuredEnvironment(object $project, object $profile): array
+    {
+        $variables = [];
+        foreach ([$project, $profile] as $source) {
+            if (method_exists($source, 'environment')) {
+                $environment = $source->environment();
+                if (is_object($environment) && method_exists($environment, 'variables')) {
+                    $variables = array_merge($variables, $environment->variables());
+                }
+            }
+        }
+        return $variables;
     }
 
     private function applyQueues(ForgeCapabilitiesClientInterface $client, object $project, string $serverId): void

@@ -106,6 +106,7 @@ it('applies configured Forge capabilities through the extended client', function
         public function databases(string $serverId): array { return []; }
         public function createDatabase(string $serverId, array $payload): array { $this->calls[] = ['database', $payload]; return ['id' => 20, 'name' => $payload['name']]; }
         public function deleteDatabase(string $serverId, string $databaseId): void {}
+        public function environment(string $serverId, string $siteId): string { return ''; }
         public function updateEnvironment(string $serverId, string $siteId, array $variables): void { $this->calls[] = ['environment', $variables]; }
         public function domains(string $serverId, string $siteId): array { return [['id' => 30, 'name' => 'example.test']]; }
         public function createDomain(string $serverId, string $siteId, array $payload): array { return ['id' => 30, 'name' => $payload['name']]; }

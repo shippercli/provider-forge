@@ -70,13 +70,18 @@ final class ForgeApiClient implements ForgeCapabilitiesClientInterface
 
     public function updateEnvironment(string $serverId, string $siteId, array $variables): void
     {
-        $existing = $this->forge->siteEnvironment($this->organizationSlug, (int) $serverId, (int) $siteId);
+        $existing = $this->environment($serverId, $siteId);
         $this->forge->updateSiteEnvironment(
             $this->organizationSlug,
             (int) $serverId,
             (int) $siteId,
             $this->mergeEnvironment($existing, $variables),
         );
+    }
+
+    public function environment(string $serverId, string $siteId): string
+    {
+        return $this->forge->siteEnvironment($this->organizationSlug, (int) $serverId, (int) $siteId);
     }
 
     public function domains(string $serverId, string $siteId): array

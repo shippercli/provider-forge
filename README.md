@@ -53,7 +53,10 @@ set it explicitly if the server's database endpoint differs. Each database gets
 an independent generated password unless `database_password` is explicitly set.
 Re-apply leaves existing database passwords unchanged and merges configured
 environment variables into the site's existing environment. Existing database
-credentials must already be available to the application.
+credentials must already be available in the existing site environment or its
+configured overrides. Reuse requires a matching database name and username, a
+host, and a nonempty password. Missing, mismatched, or malformed connection
+settings block deployment without creating a database or rotating its password.
 
 ## License
 
