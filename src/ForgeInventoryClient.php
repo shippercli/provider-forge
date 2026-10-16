@@ -44,6 +44,22 @@ final class ForgeInventoryClient extends Forge
                 throw new RuntimeException('Forge returned an invalid site environment envelope.');
             }
         }
+        if (\strtoupper($verb) === 'GET'
+            && \preg_match('#\Aorgs/[^/]+/servers/[0-9]+/sites/[0-9]+/deployments/status\z#', $uri) === 1) {
+            $shape = \json_decode($body);
+            $data = $shape->data ?? null;
+            $attributes = $data->attributes ?? null;
+            if (! $shape instanceof \stdClass || ! $data instanceof \stdClass
+                || ! \is_string($data->id ?? null) || \trim($data->id) === ''
+                || ($data->type ?? null) !== 'deploymentStatuses' || ! $attributes instanceof \stdClass
+                || ! \property_exists($attributes, 'status')
+                || ! \in_array($attributes->status, [null, 'cancelled', 'deploying', 'failed', 'failed-build', 'finished', 'pending', 'queued'], true)
+                || ! \is_string($attributes->started_at ?? null)
+                || ($shape->errors ?? []) !== [] || ! \in_array($shape->error ?? null, [null, '', false], true)
+                || (\property_exists($shape, 'success') && $shape->success !== true)) {
+                throw new RuntimeException('Forge returned an invalid deployment status response.');
+            }
+        }
         $deploymentPath = [];
         if (\preg_match('#\Aorgs/[^/]+/servers/([0-9]+)/sites/([0-9]+)/deployments(?:/([0-9]+))?\z#', $uri, $deploymentPath) === 1
             && ((\strtoupper($verb) === 'POST' && ! isset($deploymentPath[3]))

@@ -235,11 +235,19 @@ final class ForgeApiClient implements ForgeCapabilitiesClientInterface
 
     public function status(string $serverId, string $siteId): array
     {
-        return $this->forge->deploymentStatus(
+        $resource = $this->forge->deploymentStatus(
             $this->organizationSlug,
             (int) $serverId,
             (int) $siteId,
         );
+        return [
+            'id' => $resource['id'],
+            'type' => $resource['type'],
+            'attributes' => [
+                'status' => $resource['attributes']['status'],
+                'started_at' => $resource['attributes']['started_at'],
+            ],
+        ];
     }
 
     public function applicationLog(string $serverId, string $siteId): string

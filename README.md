@@ -247,3 +247,16 @@ Custom `ForgeClientInterface` implementations must make `deploy()` wait for
 confirmed completion or throw on failure; returning after enqueueing does not
 satisfy this contract. The signature remains `void`. The simulated API tests of
 the official client do not verify third-party client implementations.
+
+### Deployment status output
+
+The official client's status result retains only the JSON API resource ID/type
+and `attributes.status`/`attributes.started_at`, omitting raw response extras.
+Missing or explicitly failed envelopes and invalid state shapes fail before the
+SDK can default them to empty data. The documented nullable status is retained;
+it does not mean completion. Timestamp/shape checks follow the current
+[Forge OpenAPI contract](https://forge.laravel.com/api/docs.openapi).
+
+Consumers depending on arbitrary status resource fields must stop doing so.
+Explicit log/output methods are unchanged and may return sensitive application
+output; this status boundary does not sanitize third-party client implementations.

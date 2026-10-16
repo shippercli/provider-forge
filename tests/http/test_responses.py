@@ -26,7 +26,17 @@ class ResponsesTest(unittest.TestCase):
                 received.append((self.path, self.headers.get('Authorization'), body))
                 procedure = self.path.rsplit('/', 1)[-1]
                 case = self.headers.get('X-Fixture-Case', '')
-                if case.startswith('deployment-result-'):
+                if case.startswith('status-summary-'):
+                    result = case.removeprefix('status-summary-')
+                    record = {'id': '21', 'type': 'deploymentStatuses', 'attributes': {'status': 'finished', 'started_at': '2026-10-16T12:00:00Z', 'env': 'synthetic-status-secret'}, 'logs': 'synthetic-status-secret'}
+                    envelope = {'data': record}
+                    if result == 'null': record['attributes']['status'] = None
+                    if result == 'missing': envelope = {}
+                    if result == 'false': envelope['success'] = False
+                    if result == 'unknown': record['attributes']['status'] = 'unknown'
+                    if result == 'missing-time': record['attributes'].pop('started_at')
+                    status, payload = 200, json.dumps(envelope).encode()
+                elif case.startswith('deployment-result-'):
                     result = case.removeprefix('deployment-result-')
                     record = {'id': '21', 'type': 'deployments', 'attributes': {'status': 'queued'}}
                     if self.command == 'GET':
@@ -196,7 +206,7 @@ class ResponsesTest(unittest.TestCase):
                     self.assertTrue(scoped[2][0].endswith('/database/schemas'))
                     self.assertTrue(scoped[3][0].endswith('/database/schemas/21'))
                     self.assertEqual(json.loads(scoped[2][1])['password'], 'literal-${PROJECT_NAME}-${PROFILE}-+%:@' if variant == 'valid-explicit' else 'synthetic-database-secret')
-                self.assertEqual(len(received), 278)
+                self.assertEqual(len(received), 284)
                 for variant in ['engine-mismatch', 'engine-unknown']:
                     scoped = [(path, body) for path, _, body in received if '/orgs/' + variant + '/' in path]
                     self.assertEqual(len(scoped), 1)

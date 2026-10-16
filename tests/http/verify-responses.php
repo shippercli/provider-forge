@@ -298,3 +298,26 @@ foreach (['finished', 'failed', 'failed-build', 'cancelled', 'wrong-id', 'progre
     }
 }
 echo "Six real SDK exact-deployment completion scenarios passed\n";
+
+
+foreach (['valid', 'null', 'missing', 'false', 'unknown', 'missing-time'] as $case) {
+    $sdk = new ForgeInventoryClient('synthetic-authorization-secret', new Client(['base_uri' => $argv[1].'/',
+        'headers' => ['X-Fixture-Case' => 'status-summary-'.$case, 'Authorization' => 'Bearer synthetic-authorization-secret']]));
+    $adapter = (new ReflectionClass(\ShipperCli\ProviderForge\ForgeApiClient::class))->newInstanceWithoutConstructor();
+    (new ReflectionProperty($adapter, 'forge'))->setValue($adapter, $sdk);
+    (new ReflectionProperty($adapter, 'organizationSlug'))->setValue($adapter, 'org');
+    $failure = null;
+    $status = null;
+    try { $status = $adapter->status('7', '55'); }
+    catch (RuntimeException $error) { $failure = $error; }
+    if (in_array($case, ['valid', 'null'], true)) {
+        if ($failure !== null || str_contains(json_encode($status), 'synthetic-status-secret')
+            || array_keys($status) !== ['id', 'type', 'attributes']
+            || array_keys($status['attributes']) !== ['status', 'started_at']) {
+            throw new RuntimeException('Status exposed raw fields or lost its documented shape');
+        }
+    } elseif ($failure?->getMessage() !== 'Forge returned an invalid deployment status response.') {
+        throw new RuntimeException('Invalid deployment status response accepted');
+    }
+}
+echo "Six deployment status summary real SDK controls passed\n";
