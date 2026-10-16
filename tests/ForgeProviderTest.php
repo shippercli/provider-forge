@@ -103,6 +103,7 @@ it('applies configured Forge capabilities through the extended client', function
         public function createSite(string $serverId, array $payload): array { return ['id' => 12, 'name' => 'example.test', 'tags' => ['shipper-managed-'.substr(hash('sha256', json_encode(['project', 'profile'], JSON_THROW_ON_ERROR)), 0, 20)]]; }
         public function deploy(string $serverId, string $siteId): void { $this->calls[] = ['deploy']; }
         public function deleteSite(string $serverId, string $siteId): void {}
+        public function serverDatabaseType(string $serverId): string { return 'mysql84'; }
         public function databases(string $serverId): array { return []; }
         public function createDatabase(string $serverId, array $payload): array { $this->calls[] = ['database', $payload]; return ['id' => 20, 'name' => $payload['name']]; }
         public function deleteDatabase(string $serverId, string $databaseId): void {}

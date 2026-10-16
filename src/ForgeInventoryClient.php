@@ -67,7 +67,8 @@ final class ForgeInventoryClient extends Forge
             && \preg_match('#\Aorgs/[^/]+/servers/[0-9]+/sites/[0-9]+/domains/[0-9]+/certificates/active\z#', $uri) === 1;
         $detail = [];
         $isDetail = \strtoupper($verb) === 'GET'
-            && \preg_match('#\A(orgs/[^/]+/servers/[0-9]+/(?:sites|database/schemas|background-processes|scheduled-jobs|sites/[0-9]+/domains))/([0-9]+)\z#', $uri, $detail) === 1;
+            && \preg_match('#\A(orgs/[^/]+/servers(?:/[0-9]+/(?:sites|database/schemas|background-processes|scheduled-jobs|sites/[0-9]+/domains))?)/([0-9]+)\z#', $uri, $detail) === 1;
+        $isServerDetail = $isDetail && preg_match('#\Aorgs/[^/]+/servers\z#', $detail[1]) === 1;
         if ($isCreate || $isCertificate || $isDetail) {
             $shape = \json_decode($body);
             $data = $shape->data ?? null;
@@ -78,7 +79,10 @@ final class ForgeInventoryClient extends Forge
                 || (\property_exists($shape, 'success') && $shape->success !== true)
                 || ($attributes instanceof \stdClass && \property_exists($attributes, 'id')
                     && $this->resourceId($attributes->id) !== $id)
-                || ($isDetail && $id !== $this->resourceId($detail[2]))) {
+                || ($isDetail && $id !== $this->resourceId($detail[2]))
+                || ($isServerDetail && (! $attributes instanceof \stdClass
+                    || ! is_string($attributes->database_type ?? null)
+                    || preg_match('/\A(?:mysql|mariadb|postgres)[0-9]+\z/', $attributes->database_type) !== 1))) {
                 throw new RuntimeException($isCertificate ? 'Forge returned an invalid active certificate identity.'
                     : 'Forge returned an invalid resource response envelope.');
             }

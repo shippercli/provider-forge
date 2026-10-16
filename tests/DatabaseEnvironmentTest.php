@@ -21,6 +21,7 @@ function forgeDatabaseProject(): object
 it('delivers every generated Forge database connection with independent credentials', function (): void {
     $payloads = [];
     $client = $this->createMock(ForgeCapabilitiesClientInterface::class);
+    $client->method('serverDatabaseType')->willReturn('mysql84');
     $client->expects($this->once())->method('databases')->willReturn([]);
     $client->expects($this->exactly(2))->method('createDatabase')->willReturnCallback(static function (string $server, array $payload) use (&$payloads): array { $payloads[] = $payload; return ['id' => count($payloads), 'name' => $payload['name']]; });
     $provider = new ForgeProvider(['server_id' => 7, 'database_environment_prefixes' => ['main' => 'DB', 'analytics' => 'ANALYTICS_DB']]);
@@ -38,6 +39,7 @@ it('delivers every generated Forge database connection with independent credenti
 
 it('rejects ambiguous Forge database mappings before provider calls', function (array $prefixes): void {
     $client = $this->createMock(ForgeCapabilitiesClientInterface::class);
+    $client->method('serverDatabaseType')->willReturn('mysql84');
     $client->expects($this->never())->method('databases');
     $client->expects($this->never())->method('createDatabase');
     $provider = new ForgeProvider(['server_id' => 7, 'database_environment_prefixes' => $prefixes]);
@@ -46,6 +48,7 @@ it('rejects ambiguous Forge database mappings before provider calls', function (
 
 it('requires existing Forge database credentials without creating or rotating databases', function (string $content, bool $valid): void {
     $client = $this->createMock(ForgeCapabilitiesClientInterface::class);
+    $client->method('serverDatabaseType')->willReturn('mysql84');
     $client->expects($this->once())->method('databases')->willReturn([['name' => 'main']]);
     $client->expects($this->once())->method('environment')->with('7', '55')->willReturn($content);
     $client->expects($this->never())->method('createDatabase');
@@ -83,6 +86,7 @@ it('rejects Forge database names that collide after interpolation before API acc
     };
     $profile = new class { public function name(): string { return 'production'; } };
     $client = $this->createMock(ForgeCapabilitiesClientInterface::class);
+    $client->method('serverDatabaseType')->willReturn('mysql84');
     $client->expects($this->never())->method('databases');
     $client->expects($this->never())->method('createDatabase');
     $provider = new ForgeProvider(['server_id' => 7, 'database_environment_prefixes' => ['${PROJECT_NAME}_${PROFILE}' => 'DB', 'api_production' => 'OTHER_DB']]);
@@ -97,6 +101,7 @@ it('rejects Forge database names that collide after interpolation before API acc
 
 it('rejects Forge database creation acknowledgements for an unconfirmed resource', function (array $response): void {
     $client = $this->createMock(ForgeCapabilitiesClientInterface::class);
+    $client->method('serverDatabaseType')->willReturn('mysql84');
     $client->expects($this->once())->method('databases')->willReturn([]);
     $client->expects($this->once())->method('createDatabase')->willReturn($response);
     $provider = new ForgeProvider(['server_id' => 7, 'database_environment_prefixes' => ['main' => 'DB', 'analytics' => 'OTHER_DB']]);
@@ -112,6 +117,7 @@ it('rejects Forge database creation acknowledgements for an unconfirmed resource
 
 it('checks database names after actual Forge SDK response hydration', function (string $returnedName, bool $valid): void {
     $client = forgeSuccessClient([
+        new \GuzzleHttp\Psr7\Response(200, [], '{"data":{"id":"7","type":"servers","attributes":{"database_type":"mysql84"}}}'),
         new \GuzzleHttp\Psr7\Response(200, [], '{"data":[],"meta":{"next_cursor":null}}'),
         new \GuzzleHttp\Psr7\Response(200, [], json_encode(['data' => ['id' => '21', 'type' => 'databases', 'attributes' => ['name' => $returnedName]]], JSON_THROW_ON_ERROR)),
         new \GuzzleHttp\Psr7\Response(200, [], json_encode(['data' => ['id' => '21', 'type' => 'databases', 'attributes' => ['name' => $returnedName, 'status' => 'installed']]], JSON_THROW_ON_ERROR)),
@@ -154,6 +160,7 @@ it('uses explicit Forge passwords before provider-wide defaults without changing
         }; }
     };
     $client = $this->createMock(ForgeCapabilitiesClientInterface::class);
+    $client->method('serverDatabaseType')->willReturn('mysql84');
     $client->expects($this->once())->method('databases')->willReturn([]);
     $passwords = [];
     $client->expects($this->exactly(2))->method('createDatabase')->willReturnCallback(function ($server, $payload) use (&$passwords): array {
@@ -178,6 +185,7 @@ it('rejects invalid explicit Forge passwords before database inventory or creati
         }; }
     };
     $client = $this->createMock(ForgeCapabilitiesClientInterface::class);
+    $client->method('serverDatabaseType')->willReturn('mysql84');
     $client->expects($this->never())->method('databases');
     $client->expects($this->never())->method('createDatabase');
     $provider = new ForgeProvider(['server_id' => 7, 'database_environment_prefixes' => ['main' => 'DB', 'analytics' => 'ANALYTICS_DB']]);

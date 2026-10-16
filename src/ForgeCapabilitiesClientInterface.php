@@ -9,6 +9,8 @@ interface ForgeCapabilitiesClientInterface extends ForgeClientInterface
     /** @return list<array<string, mixed>> */
     public function databases(string $serverId): array;
 
+    public function serverDatabaseType(string $serverId): string;
+
     /** @param array<string, mixed> $payload @return array<string, mixed> */
     public function createDatabase(string $serverId, array $payload): array;
 

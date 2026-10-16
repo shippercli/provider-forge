@@ -63,6 +63,16 @@ final class ForgeApiClient implements ForgeCapabilitiesClientInterface
         $this->forge->deleteSite($this->organizationSlug, (int) $serverId, (int) $siteId);
     }
 
+    public function serverDatabaseType(string $serverId): string
+    {
+        $server = $this->forge->server($this->organizationSlug, (int) $serverId);
+        $type = $server->databaseType;
+        if (! is_string($type) || preg_match('/\A(?:mysql|mariadb|postgres)[0-9]+\z/', $type) !== 1) {
+            throw new RuntimeException('Forge server database engine is unavailable or invalid.');
+        }
+        return $type;
+    }
+
     public function databases(string $serverId): array
     {
         return $this->resources($this->forge->databases($this->organizationSlug, (int) $serverId), 'name');

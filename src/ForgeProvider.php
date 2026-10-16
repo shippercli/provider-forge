@@ -95,12 +95,13 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
         $blocked = null;
         $site = null;
         try {
+            $this->assertDatabaseServer($project);
             $site = $this->findSite($serverId, $domain);
             if ($site !== null && ! $this->isOwnedSite($site, $project, $profile)) {
                 $blocked = 'Existing Forge site lacks matching project/profile ownership. Review its identity and migrate ownership explicitly.';
             }
         } catch (Throwable) {
-            $blocked = 'Unable to verify Forge site ownership. Check API access before planning changes.';
+            $blocked = 'Unable to verify Forge site ownership or database engine. Check API access before planning changes.';
         }
         if ($blocked !== null) {
             return [
@@ -175,6 +176,7 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
 
         try {
             $serverId = $this->getServerId();
+            $this->assertDatabaseServer($project);
             $domain = (string) $this->profileValue($profile, 'domain');
             $site = $this->findSite($serverId, $domain);
             if ($site === null) {
@@ -371,6 +373,36 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
         $this->applySsl($client, $project, $serverId, $siteId, $domain);
     }
 
+    private function databaseEngine(object $database): string
+    {
+        $type = method_exists($database, 'type') ? $database->type() : 'mysql';
+        return match ($type) {
+            'mysql', 'mariadb' => $type,
+            'postgres', 'postgresql', 'pgsql' => 'postgres',
+            default => throw new \InvalidArgumentException('Forge database declarations require mysql, mariadb or PostgreSQL.'),
+        };
+    }
+
+    private function assertDatabaseServer(object $project, ?ForgeCapabilitiesClientInterface $client = null): void
+    {
+        $databases = method_exists($project, 'databases') ? $project->databases() : [];
+        if ($databases === []) return;
+        $client ??= $this->forgeCapabilitiesClient();
+        $actual = $client->serverDatabaseType($this->getServerId());
+        $family = match (true) {
+            preg_match('/\Amysql[0-9]+\z/', $actual) === 1 => 'mysql',
+            preg_match('/\Amariadb[0-9]+\z/', $actual) === 1 => 'mariadb',
+            preg_match('/\Apostgres[0-9]+\z/', $actual) === 1 => 'postgres',
+            default => throw new RuntimeException('Forge server database engine is unavailable or invalid.'),
+        };
+        foreach ($databases as $database) {
+            $expected = $this->databaseEngine($database);
+            if ($family !== $expected && ! ($expected === 'mysql' && $family === 'mariadb')) {
+                throw new RuntimeException('Forge database declaration does not match the server database engine.');
+            }
+        }
+    }
+
     /** @return array<string, mixed> */
     private function parseCompleteEnvironment(string $content): array
     {
@@ -409,6 +441,7 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
 
         $prefixes = $this->databaseEnvironmentPrefixes($project, $profile);
         $configuredPasswords = $this->configuredDatabasePasswords($project, $profile);
+        $this->assertDatabaseServer($project, $client);
         $existing = $client->databases($this->getServerId());
         foreach ($project->databases() as $database) {
             if (! method_exists($database, 'name')) {
@@ -433,7 +466,6 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
             }
             $payload = [
                 'name' => $name,
-                'type' => method_exists($database, 'type') ? $database->type() : 'mysql',
                 'user' => $username,
                 'password' => $configuredPasswords[$prefixes[$database->name()].'_PASSWORD']
                     ?? (string) ($this->config['database_password'] ?? bin2hex(random_bytes(16))),
@@ -471,6 +503,7 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
             if (! \is_object($database) || ! \method_exists($database, 'name')) {
                 throw new \InvalidArgumentException('Forge database declarations require a name.');
             }
+            $this->databaseEngine($database);
             $name = $database->name();
             $resolved = $this->interpolateDatabaseName($name, $this->projectName($project), $this->profileName($profile));
             if (\in_array($resolved, $resolvedNames, true)) {

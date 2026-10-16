@@ -158,7 +158,7 @@ foreach (['wrong-domain', 'domain-case'] as $case) {
 echo "Created site domain mismatch rejection and case-equivalent control passed\n";
 
 
-foreach (['valid', 'valid-explicit', 'foreign', 'missing-name'] as $case) {
+foreach (['valid', 'valid-explicit', 'foreign', 'missing-name', 'engine-mismatch', 'engine-unknown'] as $case) {
     $sdk = new ForgeInventoryClient('synthetic-authorization-secret', new Client([
         'base_uri' => $argv[1].'/', 'headers' => ['X-Fixture-Case' => 'database-create-'.$case, 'Authorization' => 'Bearer synthetic-authorization-secret'],
     ]));
@@ -191,8 +191,12 @@ foreach (['valid', 'valid-explicit', 'foreign', 'missing-name'] as $case) {
             || ($environment['DB_PASSWORD'] ?? null) !== $expectedPassword) {
             throw new RuntimeException('Valid Forge database creation failed');
         }
+    } elseif (in_array($case, ['engine-mismatch', 'engine-unknown'], true)) {
+        $expectedError = $case === 'engine-mismatch' ? 'Forge database declaration does not match the server database engine.'
+            : 'Forge returned an invalid resource response envelope.';
+        if ($failure?->getMessage() !== $expectedError || $environment !== []) throw new RuntimeException('Invalid server engine accepted');
     } elseif ($failure?->getMessage() !== 'Forge did not confirm the requested database creation identity.' || $environment !== []) {
         throw new RuntimeException('Invalid Forge database creation was accepted');
     }
 }
-echo "Four real HTTP provider database creation cases passed\n";
+echo "Six real HTTP provider database creation/engine cases passed\n";

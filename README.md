@@ -187,3 +187,29 @@ credentials are trusted. An unfinished double-quoted value at the end of the
 file is rejected even if valid credentials appear earlier; phpdotenv otherwise
 silently drops that unfinished value. Complete multiline passwords remain
 supported. The internal completeness probe is removed from parsed values.
+
+### Database engine selection
+
+Forge's published OpenAPI `CreateDatabaseRequest` supports `name`, `user`,
+`password` and backup configuration IDs. Its `user`/`password` fields create a
+user alongside the schema; a separate user-create call is not required for this
+path. It does not select an engine per schema. Shipper no longer sends a `type`
+field to this operation.
+
+Plan and apply inspect the server's `database_type` before authorizing database
+work; apply checks before site creation, and database reconciliation checks again
+before inventory/creation. The server response must have the requested identity
+and a readable engine. Declarations support `mysql`, `mariadb`, and PostgreSQL
+aliases `postgres`, `postgresql`, `pgsql`. A MySQL declaration also works with a
+MariaDB server through the compatible protocol; an explicit MariaDB declaration
+requires MariaDB. PostgreSQL declarations require PostgreSQL. Mismatches and
+unsupported engines block deployment rather than silently creating another
+engine's schema. Shipper does not change the server engine.
+
+Custom `ForgeCapabilitiesClientInterface` implementations must now implement
+`serverDatabaseType(string $serverId): string`, returning the observed Forge
+engine identifier (such as `mysql84`, `mariadb114` or `postgres18`). An API read
+cannot prevent a later concurrent server change; live connectivity remains a
+separate verification step.
+
+API reference: <https://forge.laravel.com/api/docs.openapi> (checked 2026-10-16).

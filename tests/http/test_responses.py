@@ -24,13 +24,16 @@ class ResponsesTest(unittest.TestCase):
                 case = self.headers.get('X-Fixture-Case', '')
                 if case.startswith('database-create-'):
                     variant = case.removeprefix('database-create-')
-                    if self.command == 'GET' and urlsplit(self.path).path.endswith('/database/schemas'):
+                    if self.command == 'GET' and urlsplit(self.path).path.endswith('/servers/7'):
+                        engine = 'postgres18' if variant == 'engine-mismatch' else 'unknown' if variant == 'engine-unknown' else 'mysql84'
+                        envelope = {'data': {'id': '7', 'type': 'servers', 'attributes': {'database_type': engine}}}
+                    elif self.command == 'GET' and urlsplit(self.path).path.endswith('/database/schemas'):
                         envelope = {'data': [], 'meta': {'next_cursor': None}}
                     else:
                         if self.command == 'POST':
                             request = json.loads(body)
                             password = 'literal-${PROJECT_NAME}-${PROFILE}-+%:@' if variant == 'valid-explicit' else 'synthetic-database-secret'
-                            if request != {'name': 'main', 'type': 'mysql', 'user': 'application', 'password': password}:
+                            if request != {'name': 'main', 'user': 'application', 'password': password}:
                                 raise AssertionError('Unexpected Forge database payload')
                         attributes = {'status': 'installed'}
                         if variant != 'missing-name': attributes['name'] = 'main' if variant in ['valid', 'valid-explicit'] else 'foreign'
@@ -118,12 +121,18 @@ class ResponsesTest(unittest.TestCase):
                 self.assertEqual(redirected, [])
                 for variant in ['valid', 'valid-explicit', 'foreign', 'missing-name']:
                     scoped = [(path, body) for path, _, body in received if '/orgs/' + variant + '/' in path]
-                    self.assertEqual(len(scoped), 3)
-                    self.assertTrue(scoped[0][0].split('?')[0].endswith('/database/schemas'))
-                    self.assertTrue(scoped[1][0].endswith('/database/schemas'))
-                    self.assertTrue(scoped[2][0].endswith('/database/schemas/21'))
-                    self.assertEqual(json.loads(scoped[1][1])['password'], 'literal-${PROJECT_NAME}-${PROFILE}-+%:@' if variant == 'valid-explicit' else 'synthetic-database-secret')
-                self.assertEqual(len(received), 225)
+                    self.assertEqual(len(scoped), 4)
+                    self.assertTrue(scoped[0][0].endswith('/servers/7'))
+                    self.assertTrue(scoped[1][0].split('?')[0].endswith('/database/schemas'))
+                    self.assertTrue(scoped[2][0].endswith('/database/schemas'))
+                    self.assertTrue(scoped[3][0].endswith('/database/schemas/21'))
+                    self.assertEqual(json.loads(scoped[2][1])['password'], 'literal-${PROJECT_NAME}-${PROFILE}-+%:@' if variant == 'valid-explicit' else 'synthetic-database-secret')
+                self.assertEqual(len(received), 231)
+                for variant in ['engine-mismatch', 'engine-unknown']:
+                    scoped = [(path, body) for path, _, body in received if '/orgs/' + variant + '/' in path]
+                    self.assertEqual(len(scoped), 1)
+                    self.assertTrue(scoped[0][0].endswith('/servers/7'))
+                    self.assertEqual(scoped[0][1], b'')
                 self.assertTrue(all(auth == 'Bearer synthetic-authorization-secret' for _, auth, _ in received))
                 self.assertEqual(sum(b'synthetic-body-secret' in body for _, _, body in received), 26)
             finally:
