@@ -22,7 +22,7 @@ it('delivers every generated Forge database connection with independent credenti
     $payloads = [];
     $client = $this->createMock(ForgeCapabilitiesClientInterface::class);
     $client->expects($this->once())->method('databases')->willReturn([]);
-    $client->expects($this->exactly(2))->method('createDatabase')->willReturnCallback(static function (string $server, array $payload) use (&$payloads): array { $payloads[] = $payload; return []; });
+    $client->expects($this->exactly(2))->method('createDatabase')->willReturnCallback(static function (string $server, array $payload) use (&$payloads): array { $payloads[] = $payload; return ['id' => count($payloads), 'name' => $payload['name']]; });
     $provider = new ForgeProvider(['server_id' => 7, 'database_environment_prefixes' => ['main' => 'DB', 'analytics' => 'ANALYTICS_DB']]);
     $profile = new class { public function name(): string { return 'production'; } };
     (new ReflectionMethod($provider, 'applyDatabases'))->invoke($provider, $client, forgeDatabaseProject(), $profile);
@@ -91,3 +91,45 @@ it('rejects Forge database names that collide after interpolation before API acc
     expect($provider->apply($project, $profile))->toBeFalse()
         ->and($provider->getLastError())->toContain('Resolved Forge database names must be unique.');
 });
+
+
+it('rejects Forge database creation acknowledgements for an unconfirmed resource', function (array $response): void {
+    $client = $this->createMock(ForgeCapabilitiesClientInterface::class);
+    $client->expects($this->once())->method('databases')->willReturn([]);
+    $client->expects($this->once())->method('createDatabase')->willReturn($response);
+    $provider = new ForgeProvider(['server_id' => 7, 'database_environment_prefixes' => ['main' => 'DB', 'analytics' => 'OTHER_DB']]);
+    $error = null;
+    try {
+        (new ReflectionMethod($provider, 'applyDatabases'))->invoke($provider, $client, forgeDatabaseProject(), new stdClass);
+    } catch (RuntimeException $exception) { $error = $exception; }
+    expect($error)->toBeInstanceOf(RuntimeException::class)
+        ->and($error?->getMessage())->toBe('Forge did not confirm the requested database creation identity.')
+        ->and((new ReflectionProperty($provider, 'generatedEnvironment'))->getValue($provider))->toBe([]);
+})->with([[[]], [['id' => 9, 'name' => 'foreign']], [['id' => 0, 'name' => 'main']],
+    [['id' => '9junk', 'name' => 'main']], [['id' => 9]], [['id' => 9, 'name' => 'main ']]]);
+
+it('checks database names after actual Forge SDK response hydration', function (string $returnedName, bool $valid): void {
+    $client = forgeSuccessClient([
+        new \GuzzleHttp\Psr7\Response(200, [], '{"data":[],"meta":{"next_cursor":null}}'),
+        new \GuzzleHttp\Psr7\Response(200, [], json_encode(['data' => ['id' => '21', 'type' => 'databases', 'attributes' => ['name' => $returnedName]]], JSON_THROW_ON_ERROR)),
+    ]);
+    $project = new class {
+        public function databases(): array { return [new class {
+            public function name(): string { return 'main'; }
+            public function user(): string { return 'application'; }
+        }]; }
+    };
+    $provider = new ForgeProvider(['server_id' => 7, 'database_password' => 'synthetic-literal-secret']);
+    $failure = null;
+    try {
+        (new ReflectionMethod($provider, 'applyDatabases'))->invoke($provider, $client, $project, new stdClass);
+    } catch (RuntimeException $error) { $failure = $error; }
+    $environment = (new ReflectionProperty($provider, 'generatedEnvironment'))->getValue($provider);
+    if ($valid) {
+        expect($failure)->toBeNull()->and($environment['DB_DATABASE'])->toBe('main')
+            ->and($environment['DB_PASSWORD'])->toBe('synthetic-literal-secret');
+    } else {
+        expect($failure?->getMessage())->toBe('Forge did not confirm the requested database creation identity.')
+            ->and($environment)->toBe([]);
+    }
+})->with([['main', true], ['foreign', false]]);

@@ -404,7 +404,14 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
                 'user' => $username,
                 'password' => (string) ($this->config['database_password'] ?? bin2hex(random_bytes(16))),
             ];
-            $client->createDatabase($this->getServerId(), $payload);
+            $created = $client->createDatabase($this->getServerId(), $payload);
+            $createdId = $created['id'] ?? null;
+            $validId = (is_int($createdId) && $createdId > 0)
+                || (is_string($createdId) && preg_match('/\A[1-9][0-9]*\z/', $createdId) === 1
+                    && filter_var($createdId, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) !== false);
+            if (! $validId || ($created['name'] ?? null) !== $name) {
+                throw new RuntimeException('Forge did not confirm the requested database creation identity.');
+            }
             $prefix = $prefixes[$database->name()];
             $this->generatedEnvironment = [...$this->generatedEnvironment,
                 $prefix.'_HOST' => (string) ($this->config['database_host'] ?? '127.0.0.1'),
