@@ -22,7 +22,20 @@ class ResponsesTest(unittest.TestCase):
                 received.append((self.path, self.headers.get('Authorization'), body))
                 procedure = self.path.rsplit('/', 1)[-1]
                 case = self.headers.get('X-Fixture-Case', '')
-                if case.startswith('resource-'):
+                if case.startswith('database-create-'):
+                    variant = case.removeprefix('database-create-')
+                    if self.command == 'GET' and urlsplit(self.path).path.endswith('/database/schemas'):
+                        envelope = {'data': [], 'meta': {'next_cursor': None}}
+                    else:
+                        if self.command == 'POST':
+                            request = json.loads(body)
+                            if request != {'name': 'main', 'type': 'mysql', 'user': 'application', 'password': 'synthetic-database-secret'}:
+                                raise AssertionError('Unexpected Forge database payload')
+                        attributes = {'status': 'installed'}
+                        if variant != 'missing-name': attributes['name'] = 'main' if variant == 'valid' else 'foreign'
+                        envelope = {'data': {'id': '21', 'type': 'databases', 'attributes': attributes}}
+                    status, payload = 200, json.dumps(envelope).encode()
+                elif case.startswith('resource-'):
                     variant = case.removeprefix('resource-')
                     record = {'id': '22' if variant == 'foreign' else '21', 'type': 'resource',
                         'attributes': {'name': 'fixture.test', 'command': 'fixture', 'status': 'installed', 'active': True}}
@@ -102,7 +115,14 @@ class ResponsesTest(unittest.TestCase):
                 result = subprocess.run(['php', str(Path(__file__).with_name('verify-responses.php')), f'http://127.0.0.1:{server.server_port}'], capture_output=True, text=True, timeout=15)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertEqual(redirected, [])
-                self.assertEqual(len(received), 213)
+                for variant in ['valid', 'foreign', 'missing-name']:
+                    scoped = [(path, body) for path, _, body in received if '/orgs/' + variant + '/' in path]
+                    self.assertEqual(len(scoped), 3)
+                    self.assertTrue(scoped[0][0].split('?')[0].endswith('/database/schemas'))
+                    self.assertTrue(scoped[1][0].endswith('/database/schemas'))
+                    self.assertTrue(scoped[2][0].endswith('/database/schemas/21'))
+                    self.assertEqual(json.loads(scoped[1][1])['password'], 'synthetic-database-secret')
+                self.assertEqual(len(received), 222)
                 self.assertTrue(all(auth == 'Bearer synthetic-authorization-secret' for _, auth, _ in received))
                 self.assertEqual(sum(b'synthetic-body-secret' in body for _, _, body in received), 26)
             finally:

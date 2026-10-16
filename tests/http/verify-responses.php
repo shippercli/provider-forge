@@ -156,3 +156,34 @@ foreach (['wrong-domain', 'domain-case'] as $case) {
     }
 }
 echo "Created site domain mismatch rejection and case-equivalent control passed\n";
+
+
+foreach (['valid', 'foreign', 'missing-name'] as $case) {
+    $sdk = new ForgeInventoryClient('synthetic-authorization-secret', new Client([
+        'base_uri' => $argv[1].'/', 'headers' => ['X-Fixture-Case' => 'database-create-'.$case, 'Authorization' => 'Bearer synthetic-authorization-secret'],
+    ]));
+    $adapter = (new ReflectionClass(\ShipperCli\ProviderForge\ForgeApiClient::class))->newInstanceWithoutConstructor();
+    (new ReflectionProperty($adapter, 'forge'))->setValue($adapter, $sdk);
+    (new ReflectionProperty($adapter, 'organizationSlug'))->setValue($adapter, $case);
+    $project = new class {
+        public function databases(): array { return [new class {
+            public function name(): string { return 'main'; }
+            public function user(): string { return 'application'; }
+        }]; }
+    };
+    $provider = new \ShipperCli\ProviderForge\ForgeProvider(['server_id' => 7, 'database_password' => 'synthetic-database-secret']);
+    $failure = null;
+    try {
+        (new ReflectionMethod($provider, 'applyDatabases'))->invoke($provider, $adapter, $project, new stdClass);
+    } catch (RuntimeException $error) { $failure = $error; }
+    $environment = (new ReflectionProperty($provider, 'generatedEnvironment'))->getValue($provider);
+    if ($case === 'valid') {
+        if ($failure !== null || ($environment['DB_DATABASE'] ?? null) !== 'main'
+            || ($environment['DB_PASSWORD'] ?? null) !== 'synthetic-database-secret') {
+            throw new RuntimeException('Valid Forge database creation failed');
+        }
+    } elseif ($failure?->getMessage() !== 'Forge did not confirm the requested database creation identity.' || $environment !== []) {
+        throw new RuntimeException('Invalid Forge database creation was accepted');
+    }
+}
+echo "Three real HTTP provider database creation cases passed\n";
