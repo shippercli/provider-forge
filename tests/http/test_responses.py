@@ -22,7 +22,17 @@ class ResponsesTest(unittest.TestCase):
                 received.append((self.path, self.headers.get('Authorization'), body))
                 procedure = self.path.rsplit('/', 1)[-1]
                 case = self.headers.get('X-Fixture-Case', '')
-                if case in ['duplicate-id', 'duplicate-site']:
+                if case.startswith('raw-id-'):
+                    value = case.removeprefix('raw-id-')
+                    identities = {'fraction': 21.5, 'boolean': True, 'junk': '21junk', 'exponent': '2.1e1',
+                        'padded': ' 21', 'leading-zero': '021', 'null': None, 'valid-int': 21, 'valid-string': '21'}
+                    attributes = {'name': 'fixture', 'command': 'fixture'}
+                    if value in ['shadow', 'shadow-fraction', 'valid-same']:
+                        attributes['id'] = {'shadow': 22, 'shadow-fraction': 21.5, 'valid-same': '21'}[value]
+                    identity = identities.get(value, '21')
+                    status, payload = 200, json.dumps({'data': [{'id': identity, 'type': 'resource', 'attributes': attributes}],
+                        'meta': {'next_cursor': None}}).encode()
+                elif case in ['duplicate-id', 'duplicate-site']:
                     cursor = parse_qs(urlsplit(self.path).query).get('page[cursor]', [None])[0]
                     if case == 'duplicate-id':
                         data = [{'id': '1', 'type': 'resource', 'attributes': {'name': 'fixture-' + str(cursor), 'command': 'fixture'}}]
@@ -78,7 +88,7 @@ class ResponsesTest(unittest.TestCase):
                 result = subprocess.run(['php', str(Path(__file__).with_name('verify-responses.php')), f'http://127.0.0.1:{server.server_port}'], capture_output=True, text=True, timeout=15)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertEqual(redirected, [])
-                self.assertEqual(len(received), 116)
+                self.assertEqual(len(received), 156)
                 self.assertTrue(all(auth == 'Bearer synthetic-authorization-secret' for _, auth, _ in received))
                 self.assertEqual(sum(b'synthetic-body-secret' in body for _, _, body in received), 26)
             finally:

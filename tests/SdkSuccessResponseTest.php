@@ -83,3 +83,31 @@ it('preserves distinct workload identities sharing one command', function (strin
     ], 'meta' => ['next_cursor' => null]]));
     expect(array_column(forgeSuccessClient([$response])->{$method}('7'), 'id'))->toBe([1, 2]);
 })->with(['scheduledJobs', 'backgroundProcesses']);
+
+it('rejects malformed raw IDs before Forge SDK hydration', function (string $method, mixed $id): void {
+    $response = new Response(200, [], json_encode(['data' => [['id' => $id, 'type' => 'resource',
+        'attributes' => ['name' => 'fixture', 'command' => 'fixture']]], 'meta' => ['next_cursor' => null]]));
+    $args = $method === 'domains' ? ['7', '12'] : ['7'];
+    expect(fn () => forgeSuccessClient([$response])->{$method}(...$args))
+        ->toThrow(RuntimeException::class, 'invalid resource inventory envelope');
+})->with(['sites', 'databases', 'domains', 'backgroundProcesses', 'scheduledJobs'])
+    ->with([21.5, true, '21junk', '2.1e1', ' 21', '021', null]);
+
+it('rejects identity shadowing in JSON API attributes', function (mixed $id): void {
+    $response = new Response(200, [], json_encode(['data' => [['id' => '21', 'type' => 'sites',
+        'attributes' => ['id' => $id, 'name' => 'fixture']]], 'meta' => ['next_cursor' => null]]));
+    expect(fn () => forgeSuccessClient([$response])->sites('7'))
+        ->toThrow(RuntimeException::class, 'invalid resource inventory envelope');
+})->with([22, 21.5]);
+
+it('checks raw identity integer bounds without truncating valid IDs', function (bool $overflow): void {
+    $id = (string) PHP_INT_MAX.($overflow ? '0' : '');
+    $response = new Response(200, [], json_encode(['data' => [['id' => $id, 'type' => 'sites',
+        'attributes' => ['name' => 'fixture']]], 'meta' => ['next_cursor' => null]]));
+    $client = forgeSuccessClient([$response]);
+    if ($overflow) {
+        expect(fn () => $client->sites('7'))->toThrow(RuntimeException::class, 'invalid resource inventory envelope');
+    } else {
+        expect($client->sites('7')[0]['id'])->toBe(PHP_INT_MAX);
+    }
+})->with([true, false]);

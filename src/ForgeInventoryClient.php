@@ -43,7 +43,12 @@ final class ForgeInventoryClient extends Forge
                 throw new RuntimeException('Forge returned an invalid resource inventory envelope.');
             }
             foreach ($shape->data as $item) {
-                if (! $item instanceof \stdClass) {
+                if (! $item instanceof \stdClass || $this->resourceId($item->id ?? null) === null) {
+                    throw new RuntimeException('Forge returned an invalid resource inventory envelope.');
+                }
+                $attributes = $item->attributes ?? null;
+                if ($attributes instanceof \stdClass && \property_exists($attributes, 'id')
+                    && $this->resourceId($attributes->id) !== $this->resourceId($item->id)) {
                     throw new RuntimeException('Forge returned an invalid resource inventory envelope.');
                 }
             }
@@ -71,6 +76,13 @@ final class ForgeInventoryClient extends Forge
 
         return $response;
     }
+    private function resourceId(mixed $value): ?int
+    {
+        $id = (\is_int($value) || (\is_string($value) && \preg_match('/^[1-9][0-9]*$/D', $value) === 1))
+            ? \filter_var($value, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) : false;
+        return $id === false ? null : $id;
+    }
+
     private function isInventoryUri(string $uri): bool
     {
         return \preg_match('#\Aorgs/[^/]+/servers/[0-9]+/(?:sites|database/schemas|background-processes|scheduled-jobs|sites/[0-9]+/domains)\z#', $uri) === 1;

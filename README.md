@@ -147,3 +147,11 @@ so ambiguous records cannot be selected as a first match. Separate workload
 records may share a command; uniqueness is based on their IDs. Invalid reads
 throw before the accumulated inventory is returned. This is observation-time
 validation and does not lock or snapshot the remote account.
+
+Raw collection IDs are checked before SDK hydration: only positive integers or
+canonical positive decimal strings within PHP's integer range are accepted.
+Fractions, booleans, exponents, whitespace and trailing text cannot become valid
+IDs through coercion. If JSON API attributes also contain an ID, it must be
+valid and equal to the top-level identity before the SDK flattens attributes.
+This protects the collection endpoints; detail/create responses remain subject
+to their own resource checks and are not covered by this collection guard.

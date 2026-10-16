@@ -82,3 +82,24 @@ foreach (['sites', 'databases', 'domains', 'backgroundProcesses', 'scheduledJobs
     if ($failure === null || $failure->getMessage() !== $expected) throw new RuntimeException('Duplicate Forge identity accepted: '.$scenario);
 }
 echo "Six real HTTP duplicate identity rejections passed\n";
+
+foreach (['fraction', 'boolean', 'junk', 'exponent', 'padded', 'leading-zero', 'null', 'shadow', 'shadow-fraction', 'valid-int', 'valid-string', 'valid-same'] as $case) {
+    $methods = in_array($case, ['shadow', 'shadow-fraction', 'valid-int', 'valid-string', 'valid-same'], true)
+        ? ['sites'] : ['sites', 'databases', 'domains', 'backgroundProcesses', 'scheduledJobs'];
+    foreach ($methods as $method) {
+        $sdk = new ForgeInventoryClient('synthetic-authorization-secret', new Client(['base_uri' => $argv[1].'/',
+            'headers' => ['Authorization' => 'Bearer synthetic-authorization-secret', 'X-Fixture-Case' => 'raw-id-'.$case]]));
+        $adapter = (new ReflectionClass(\ShipperCli\ProviderForge\ForgeApiClient::class))->newInstanceWithoutConstructor();
+        (new ReflectionProperty($adapter, 'forge'))->setValue($adapter, $sdk);
+        (new ReflectionProperty($adapter, 'organizationSlug'))->setValue($adapter, 'org');
+        $failure = null;
+        try { $items = $adapter->{$method}(...($method === 'domains' ? ['7', '12'] : ['7'])); }
+        catch (Throwable $exception) { $failure = $exception; }
+        if (str_starts_with($case, 'valid-')) {
+            if ($failure !== null || array_column($items, 'id') !== [21]) throw new RuntimeException('Valid raw identity changed');
+        } elseif (!$failure instanceof RuntimeException || $failure->getMessage() !== 'Forge returned an invalid resource inventory envelope.') {
+            throw new RuntimeException('Malformed raw Forge identity accepted: '.$case.'/'.$method);
+        }
+    }
+}
+echo "37 real HTTP raw identity rejections and three valid controls passed\n";
