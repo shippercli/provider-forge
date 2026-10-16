@@ -53,6 +53,13 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
     public function validate(object $project, object $profile): array
     {
         $errors = [];
+        try {
+            $this->deploymentTimeout();
+            $this->databaseEnvironmentPrefixes($project, $profile);
+            $this->configuredDatabasePasswords($project, $profile);
+        } catch (\InvalidArgumentException $exception) {
+            $errors[] = $exception->getMessage();
+        }
 
         if (! isset($this->config['api_token']) || $this->config['api_token'] === '') {
             $errors[] = 'Forge API token is required';
@@ -76,6 +83,9 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
 
     public function plan(object $project, object $profile): array
     {
+        $this->deploymentTimeout();
+        $this->databaseEnvironmentPrefixes($project, $profile);
+        $this->configuredDatabasePasswords($project, $profile);
         $serverId = $this->getServerId();
         $domainValue = $this->profileValue($profile, 'domain');
         $domain = \is_string($domainValue) ? $domainValue : '';
@@ -84,16 +94,62 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
         $profileName = method_exists($profile, 'name') ? $profile->name() : 'unknown';
         $branch = method_exists($profile, 'branch') ? $profile->branch() : 'main';
 
-        $actions = ["Create or find site for domain: {$domain}"];
+        $blocked = null;
+        $site = null;
+        try {
+            $this->assertDatabaseServer($project);
+            $site = $this->findSite($serverId, $domain);
+            if ($site !== null && ! $this->isOwnedSite($site, $project, $profile)) {
+                $blocked = 'Existing Forge site lacks matching project/profile ownership. Review its identity and migrate ownership explicitly.';
+            }
+        } catch (Throwable) {
+            $blocked = 'Unable to verify Forge site ownership or database engine. Check API access before planning changes.';
+        }
+        if ($blocked !== null) {
+            return [
+                'provider' => $this->getName(), 'project' => $projectName,
+                'profile' => $profileName, 'branch' => $branch,
+                'server_id' => $serverId, 'domain' => $domain,
+                'blocked' => true,
+                'actions' => ['BLOCKED: '.$blocked],
+                'note' => 'No deployment actions are authorized by this plan.',
+            ];
+        }
+
+        $actions = [$site === null ? "Create site for domain: {$domain}" : "Reuse owned site for domain: {$domain}"];
 
         if (method_exists($project, 'databases')) {
             $databases = $project->databases();
             if (! empty($databases)) {
+                $existing = $this->forgeCapabilitiesClient()->databases($serverId);
+                $environment = $site === null ? [] : $this->parseCompleteEnvironment($this->forgeCapabilitiesClient()->environment($serverId, (string) $this->siteId($site)));
                 foreach ($databases as $database) {
-                    $dbName = $this->interpolateDatabaseName($database->name(), $projectName, $profileName);
-                    $actions[] = "Create database: {$dbName}";
+                    $declaredName = $database->name();
+                    $dbName = $this->interpolateDatabaseName($declaredName, $projectName, $profileName);
+                    if ($this->resourceByName($existing, $dbName) === null) {
+                        $actions[] = "Create database: {$dbName}";
+                    } elseif ($this->hasDatabaseOwnership($environment, $project, $profile, $dbName, 'created')) {
+                        $actions[] = "Reuse Shipper-created database: {$dbName}";
+                    } elseif ($this->hasDatabaseOwnership($environment, $project, $profile, $dbName, 'adopted')) {
+                        $actions[] = "Reuse adopted database: {$dbName}";
+                    } elseif ($this->databaseAdoptionAuthorized($project, $profile, $dbName)) {
+                        $actions[] = "Adopt existing Forge database: {$dbName}";
+                    } else {
+                        $blocked = 'An existing Forge database requires exact-scope adoption consent.';
+                    }
                 }
             }
+        }
+
+        if ($blocked !== null) {
+            return [
+                'provider' => $this->getName(), 'project' => $projectName,
+                'profile' => $profileName, 'branch' => $branch,
+                'server_id' => $serverId, 'domain' => $domain,
+                'blocked' => true,
+                'actions' => ['BLOCKED: '.$blocked],
+                'note' => 'No deployment actions are authorized by this plan.',
+            ];
         }
 
         if (method_exists($project, 'environment') || method_exists($profile, 'environment')) {
@@ -129,6 +185,7 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
             'branch' => $branch,
             'server_id' => $serverId,
             'domain' => $domain,
+            'blocked' => false,
             'actions' => $actions,
             'note' => 'Forge API v2 deploys the source already configured on the Forge site; Shipper does not mutate repository or branch settings.',
         ];
@@ -145,6 +202,7 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
 
         try {
             $serverId = $this->getServerId();
+            $this->assertDatabaseServer($project);
             $domain = (string) $this->profileValue($profile, 'domain');
             $site = $this->findSite($serverId, $domain);
             if ($site === null) {
@@ -153,9 +211,15 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
                     'project_type' => method_exists($project, 'type')
                         ? (string) $project->type()
                         : (string) ($this->config['project_type'] ?? 'php'),
-                    'tags' => [$this->ownershipTag()],
+                    'tags' => [$this->ownershipTag($project, $profile)],
                 ]);
-            } elseif (! $this->isOwnedSite($site)) {
+                $returnedDomain = $site['name'] ?? $site['domain'] ?? null;
+                if (! \is_string($returnedDomain) || \trim($returnedDomain) !== $returnedDomain
+                    || \strcasecmp($returnedDomain, $domain) !== 0
+                    || (isset($site['domain']) && (! \is_string($site['domain']) || \strcasecmp($site['domain'], $domain) !== 0))) {
+                    throw new RuntimeException('Forge created site did not confirm the requested domain.');
+                }
+            } elseif (! $this->isOwnedSite($site, $project, $profile)) {
                 throw new RuntimeException('Forge site exists but is not owned by Shipper; refusing to modify it');
             }
             $siteId = $this->siteId($site);
@@ -186,7 +250,7 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
                 $this->lastError = '';
                 return true;
             }
-            if (! $this->isOwnedSite($site)) {
+            if (! $this->isOwnedSite($site, $project, $profile)) {
                 throw new RuntimeException('Forge site is not owned by Shipper; refusing to destroy it');
             }
             $siteId = $this->siteId($site);
@@ -207,7 +271,7 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
     {
         $sites = [];
         foreach ($this->forgeClient()->sites($this->getServerId()) as $site) {
-            if (! $this->isOwnedSite($site)) {
+            if (! $this->isOwnedSite($site, $project, $profile)) {
                 continue;
             }
 
@@ -229,7 +293,7 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
             if ($this->siteId($site) !== (string) $siteId) {
                 continue;
             }
-            if (! $this->isOwnedSite($site)) {
+            if (! $this->isOwnedSite($site, $project, $profile)) {
                 $this->lastError = 'Forge site is not owned by Shipper; refusing to destroy it';
 
                 return false;
@@ -298,11 +362,21 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
         return $name;
     }
 
+    private function deploymentTimeout(): int
+    {
+        $timeout = array_key_exists('deployment_timeout', $this->config) ? $this->config['deployment_timeout'] : 300;
+        if (! is_int($timeout) || $timeout < 1 || $timeout > 3600) {
+            throw new \InvalidArgumentException('Forge deployment timeout must be between 1 and 3600 seconds.');
+        }
+        return $timeout;
+    }
+
     private function forgeClient(): ForgeClientInterface
     {
         return $this->client ?? new ForgeApiClient(
             (string) $this->config['organization_slug'],
             (string) $this->config['api_token'],
+            deploymentTimeout: $this->deploymentTimeout(),
         );
     }
 
@@ -328,60 +402,241 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
             return;
         }
         $client = $this->forgeCapabilitiesClient();
-        $this->applyDatabases($client, $project, $profile);
+        $this->applyDatabases($client, $project, $profile, $siteId);
         $this->applyEnvironment($client, $project, $profile, $serverId, $siteId);
         $this->applyQueues($client, $project, $serverId);
         $this->applyCron($client, $project, $serverId);
         $this->applySsl($client, $project, $serverId, $siteId, $domain);
     }
 
-    private function applyDatabases(ForgeCapabilitiesClientInterface $client, object $project, object $profile): void
+    private function databaseEngine(object $database): string
+    {
+        $type = method_exists($database, 'type') ? $database->type() : 'mysql';
+        return match ($type) {
+            'mysql', 'mariadb' => $type,
+            'postgres', 'postgresql', 'pgsql' => 'postgres',
+            default => throw new \InvalidArgumentException('Forge database declarations require mysql, mariadb or PostgreSQL.'),
+        };
+    }
+
+    private function assertDatabaseServer(object $project, ?ForgeCapabilitiesClientInterface $client = null): void
+    {
+        $databases = method_exists($project, 'databases') ? $project->databases() : [];
+        if ($databases === []) return;
+        $client ??= $this->forgeCapabilitiesClient();
+        $actual = $client->serverDatabaseType($this->getServerId());
+        $family = match (true) {
+            preg_match('/\Amysql[0-9]+\z/', $actual) === 1 => 'mysql',
+            preg_match('/\Amariadb[0-9]+\z/', $actual) === 1 => 'mariadb',
+            preg_match('/\Apostgres[0-9]+\z/', $actual) === 1 => 'postgres',
+            default => throw new RuntimeException('Forge server database engine is unavailable or invalid.'),
+        };
+        foreach ($databases as $database) {
+            $expected = $this->databaseEngine($database);
+            if ($family !== $expected && ! ($expected === 'mysql' && $family === 'mariadb')) {
+                throw new RuntimeException('Forge database declaration does not match the server database engine.');
+            }
+        }
+    }
+
+    /** @return array<string, mixed> */
+    private function parseCompleteEnvironment(string $content): array
+    {
+        $probe = '__SHIPPER_ENV_END_'.\bin2hex(\random_bytes(16));
+        $values = \Dotenv\Dotenv::parse($content."\n".$probe."=1\n");
+        if (($values[$probe] ?? null) !== '1') {
+            throw new \RuntimeException('Application environment input is incomplete.');
+        }
+        unset($values[$probe]);
+        return $values;
+    }
+
+    /** @return array<string, string> */
+    private function configuredDatabasePasswords(object $project, object $profile): array
+    {
+        $configured = $this->configuredEnvironment($project, $profile);
+        $passwords = [];
+        foreach ($this->databaseEnvironmentPrefixes($project, $profile) as $prefix) {
+            $key = $prefix.'_PASSWORD';
+            if (! array_key_exists($key, $configured)) {
+                continue;
+            }
+            if (! is_string($configured[$key]) || $configured[$key] === '') {
+                throw new \InvalidArgumentException('Explicit Forge database passwords must be nonempty strings.');
+            }
+            $passwords[$key] = $configured[$key];
+        }
+        return $passwords;
+    }
+
+    private function applyDatabases(ForgeCapabilitiesClientInterface $client, object $project, object $profile, string $siteId = ''): void
     {
         if (! method_exists($project, 'databases')) {
             return;
         }
 
+        $prefixes = $this->databaseEnvironmentPrefixes($project, $profile);
+        $configuredPasswords = $this->configuredDatabasePasswords($project, $profile);
+        $this->assertDatabaseServer($project, $client);
         $existing = $client->databases($this->getServerId());
         foreach ($project->databases() as $database) {
             if (! method_exists($database, 'name')) {
                 continue;
             }
             $name = $this->interpolateDatabaseName($database->name(), $this->projectName($project), $this->profileName($profile));
+            $username = method_exists($database, 'user') ? $this->interpolateDatabaseName($database->user(), $this->projectName($project), $this->profileName($profile)) : $name;
             if ($this->resourceByName($existing, $name) !== null) {
+                try {
+                    $storedEnvironment = $this->parseCompleteEnvironment($client->environment($this->getServerId(), $siteId));
+                    $configuredEnvironment = $this->configuredEnvironment($project, $profile);
+                } catch (\Throwable) {
+                    throw new RuntimeException('Cannot read or parse the Forge site environment before reusing an existing database.');
+                }
+                $prefix = $prefixes[$database->name()];
+                foreach (['_HOST', '_DATABASE', '_USERNAME', '_PASSWORD'] as $suffix) {
+                    $key = $prefix.$suffix;
+                    if (array_key_exists($key, $storedEnvironment)
+                        && array_key_exists($key, $configuredEnvironment)
+                        && $storedEnvironment[$key] !== $configuredEnvironment[$key]) {
+                        throw new RuntimeException("Existing Forge database {$name} has conflicting configured connection settings; preserving the stored credentials.");
+                    }
+                }
+                $available = [...$storedEnvironment, ...$configuredEnvironment];
+                if (($available[$prefix.'_DATABASE'] ?? null) !== $name
+                    || ($available[$prefix.'_USERNAME'] ?? null) !== $username
+                    || ! is_string($available[$prefix.'_HOST'] ?? null) || $available[$prefix.'_HOST'] === ''
+                    || ! is_string($available[$prefix.'_PASSWORD'] ?? null) || $available[$prefix.'_PASSWORD'] === '') {
+                    throw new RuntimeException("Existing Forge database {$name} requires matching {$prefix} connection settings and a password in the application environment.");
+                }
+                if ($siteId !== '') {
+                    if ($this->hasDatabaseOwnership($storedEnvironment, $project, $profile, $name, 'created')
+                        || $this->hasDatabaseOwnership($storedEnvironment, $project, $profile, $name, 'adopted')) {
+                        continue;
+                    }
+                    if (! $this->databaseAdoptionAuthorized($project, $profile, $name)) {
+                        throw new RuntimeException("Existing Forge database {$name} requires exact-scope adoption consent.");
+                    }
+                    $this->generatedEnvironment[$this->databaseOwnershipKey($name)] = 'adopted:'.$this->databaseOwnershipMarker($project, $profile, $name);
+                    $client->updateEnvironment($this->getServerId(), $siteId, $this->generatedEnvironment);
+                }
                 continue;
             }
             $payload = [
                 'name' => $name,
-                'type' => method_exists($database, 'type') ? $database->type() : 'mysql',
-                'user' => method_exists($database, 'user') ? $database->user() : $name,
-                'password' => (string) ($this->config['database_password'] ?? bin2hex(random_bytes(16))),
+                'user' => $username,
+                'password' => $configuredPasswords[$prefixes[$database->name()].'_PASSWORD']
+                    ?? (string) ($this->config['database_password'] ?? bin2hex(random_bytes(16))),
             ];
-            $client->createDatabase($this->getServerId(), $payload);
-            if ($this->generatedEnvironment === []) {
-                $this->generatedEnvironment = [
-                    'DB_DATABASE' => $name,
-                    'DB_USERNAME' => (string) $payload['user'],
-                    'DB_PASSWORD' => (string) $payload['password'],
-                ];
+            $created = $client->createDatabase($this->getServerId(), $payload);
+            $createdId = $created['id'] ?? null;
+            $validId = (is_int($createdId) && $createdId > 0)
+                || (is_string($createdId) && preg_match('/\A[1-9][0-9]*\z/', $createdId) === 1
+                    && filter_var($createdId, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) !== false);
+            if (! $validId || ($created['name'] ?? null) !== $name) {
+                throw new RuntimeException('Forge did not confirm the requested database creation identity.');
+            }
+            $prefix = $prefixes[$database->name()];
+            $this->generatedEnvironment = [...$this->generatedEnvironment,
+                $this->databaseOwnershipKey($name) => 'created:'.$this->databaseOwnershipMarker($project, $profile, $name),
+                $prefix.'_HOST' => (string) ($this->config['database_host'] ?? '127.0.0.1'),
+                $prefix.'_DATABASE' => $name,
+                $prefix.'_USERNAME' => (string) $payload['user'],
+                $prefix.'_PASSWORD' => (string) $payload['password'],
+            ];
+            if ($siteId !== '') {
+                $existing[] = ['name' => $name];
+                $client->updateEnvironment($this->getServerId(), $siteId, $this->generatedEnvironment);
             }
         }
     }
 
+    private function databaseOwnershipKey(string $name): string
+    {
+        return 'SHIPPERCLI_DATABASE_'.strtoupper(substr(hash('sha256', $name), 0, 24));
+    }
+
+    private function databaseOwnershipMarker(object $project, object $profile, string $name): string
+    {
+        return hash('sha256', json_encode([$this->projectName($project), $this->profileName($profile), $name], JSON_THROW_ON_ERROR));
+    }
+
+    private function hasDatabaseOwnership(array $environment, object $project, object $profile, string $name, string $state): bool
+    {
+        return ($environment[$this->databaseOwnershipKey($name)] ?? null) === $state.':'.$this->databaseOwnershipMarker($project, $profile, $name);
+    }
+
+    private function databaseAdoptionAuthorized(object $project, object $profile, string $name): bool
+    {
+        $forge = $this->profileValue($profile, 'forge');
+        $entries = is_array($forge) ? ($forge['adopt_existing_databases'] ?? []) : [];
+        if (! is_array($entries)) throw new \InvalidArgumentException('Forge adopt_existing_databases must list exact project/profile/name identities.');
+        foreach ($entries as $entry) {
+            if (! is_array($entry) || array_diff(array_keys($entry), ['project', 'profile', 'name']) !== []
+                || ! is_string($entry['project'] ?? null) || ! is_string($entry['profile'] ?? null) || ! is_string($entry['name'] ?? null)) {
+                throw new \InvalidArgumentException('Forge adoption entries require string project, profile, and name fields only.');
+            }
+            if ($entry['project'] === $this->projectName($project) && $entry['profile'] === $this->profileName($profile) && $entry['name'] === $name) return true;
+        }
+        return false;
+    }
+
+    /** @return array<string, string> */
+    private function databaseEnvironmentPrefixes(object $project, object $profile): array
+    {
+        $databases = method_exists($project, 'databases')
+            ? $project->databases() : [];
+        $configured = $this->config['database_environment_prefixes'] ?? [];
+        if (! \is_array($configured)) {
+            throw new \InvalidArgumentException('Forge database_environment_prefixes must be a map of database names to environment prefixes.');
+        }
+        $prefixes = [];
+        $resolvedNames = [];
+        foreach ($databases as $database) {
+            if (! \is_object($database) || ! \method_exists($database, 'name')) {
+                throw new \InvalidArgumentException('Forge database declarations require a name.');
+            }
+            $this->databaseEngine($database);
+            $name = $database->name();
+            $resolved = $this->interpolateDatabaseName($name, $this->projectName($project), $this->profileName($profile));
+            if (\in_array($resolved, $resolvedNames, true)) {
+                throw new \InvalidArgumentException('Resolved Forge database names must be unique.');
+            }
+            $resolvedNames[] = $resolved;
+            $prefix = $configured[$name] ?? (\count($databases) === 1 ? 'DB' : null);
+            if (! \is_string($prefix) || \preg_match('/\A[A-Z_][A-Z0-9_]*\z/', $prefix) !== 1) {
+                throw new \InvalidArgumentException("Forge database {$name} requires a valid database_environment_prefixes entry when multiple databases are declared.");
+            }
+            if (isset($prefixes[$name]) || \in_array($prefix, $prefixes, true)) {
+                throw new \InvalidArgumentException('Forge database names and environment prefixes must be unique.');
+            }
+            $prefixes[$name] = $prefix;
+        }
+
+        return $prefixes;
+    }
+
     private function applyEnvironment(ForgeCapabilitiesClientInterface $client, object $project, object $profile, string $serverId, string $siteId): void
+    {
+        $variables = $this->configuredEnvironment($project, $profile);
+        $variables = [...$variables, ...$this->generatedEnvironment];
+        if ($variables !== []) {
+            $client->updateEnvironment($serverId, $siteId, $variables);
+        }
+    }
+
+    /** @return array<string, string> */
+    private function configuredEnvironment(object $project, object $profile): array
     {
         $variables = [];
         foreach ([$project, $profile] as $source) {
             if (method_exists($source, 'environment')) {
                 $environment = $source->environment();
-                if (method_exists($environment, 'variables')) {
+                if (is_object($environment) && method_exists($environment, 'variables')) {
                     $variables = array_merge($variables, $environment->variables());
                 }
             }
         }
-        $variables = [...$variables, ...$this->generatedEnvironment];
-        if ($variables !== []) {
-            $client->updateEnvironment($serverId, $siteId, $variables);
-        }
+        return $variables;
     }
 
     private function applyQueues(ForgeCapabilitiesClientInterface $client, object $project, string $serverId): void
@@ -514,14 +769,14 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
     }
 
     /** @param array<string, mixed> $site */
-    private function isOwnedSite(array $site): bool
+    private function isOwnedSite(array $site, object $project, object $profile): bool
     {
         $tags = $site['tags'] ?? [];
-        return is_array($tags) && in_array($this->ownershipTag(), $tags, true);
+        return is_array($tags) && in_array($this->ownershipTag($project, $profile), $tags, true);
     }
 
-    private function ownershipTag(): string
+    private function ownershipTag(object $project, object $profile): string
     {
-        return (string) ($this->config['ownership_tag'] ?? 'shipper-managed');
+        return (string) ($this->config['ownership_tag'] ?? 'shipper-managed').'-'.substr(hash('sha256', json_encode([$this->projectName($project), $this->profileName($profile)], JSON_THROW_ON_ERROR)), 0, 20);
     }
 }
