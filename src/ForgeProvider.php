@@ -89,7 +89,28 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
         $profileName = method_exists($profile, 'name') ? $profile->name() : 'unknown';
         $branch = method_exists($profile, 'branch') ? $profile->branch() : 'main';
 
-        $actions = ["Create or find site for domain: {$domain}"];
+        $blocked = null;
+        $site = null;
+        try {
+            $site = $this->findSite($serverId, $domain);
+            if ($site !== null && ! $this->isOwnedSite($site, $project, $profile)) {
+                $blocked = 'Existing Forge site lacks matching project/profile ownership. Review its identity and migrate ownership explicitly.';
+            }
+        } catch (Throwable) {
+            $blocked = 'Unable to verify Forge site ownership. Check API access before planning changes.';
+        }
+        if ($blocked !== null) {
+            return [
+                'provider' => $this->getName(), 'project' => $projectName,
+                'profile' => $profileName, 'branch' => $branch,
+                'server_id' => $serverId, 'domain' => $domain,
+                'blocked' => true,
+                'actions' => ['BLOCKED: '.$blocked],
+                'note' => 'No deployment actions are authorized by this plan.',
+            ];
+        }
+
+        $actions = [$site === null ? "Create site for domain: {$domain}" : "Reuse owned site for domain: {$domain}"];
 
         if (method_exists($project, 'databases')) {
             $databases = $project->databases();
@@ -134,6 +155,7 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
             'branch' => $branch,
             'server_id' => $serverId,
             'domain' => $domain,
+            'blocked' => false,
             'actions' => $actions,
             'note' => 'Forge API v2 deploys the source already configured on the Forge site; Shipper does not mutate repository or branch settings.',
         ];

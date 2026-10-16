@@ -79,3 +79,12 @@ settings block deployment without creating a database or rotating its password.
 ## License
 
 MIT
+
+### Plan ownership inspection
+
+Planning reads Forge site inventory and requires API access. A matching owned
+site is reported as reuse; a missing site is reported as create. An unmanaged
+or differently scoped collision, or an inventory read failure, produces
+`blocked: true` and a single blocked action instead of deployment actions.
+Planning performs no writes. Database and workload reconciliation prerequisites
+still require separate validation during apply.
