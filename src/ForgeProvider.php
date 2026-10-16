@@ -558,8 +558,8 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
 
     private function databaseAdoptionAuthorized(object $project, object $profile, string $name): bool
     {
-        $ploi = $this->profileValue($profile, 'forge');
-        $entries = is_array($ploi) ? ($ploi['adopt_existing_databases'] ?? []) : [];
+        $forge = $this->profileValue($profile, 'forge');
+        $entries = is_array($forge) ? ($forge['adopt_existing_databases'] ?? []) : [];
         if (! is_array($entries)) throw new \InvalidArgumentException('Forge adopt_existing_databases must list exact project/profile/name identities.');
         foreach ($entries as $entry) {
             if (! is_array($entry) || array_diff(array_keys($entry), ['project', 'profile', 'name']) !== []
