@@ -101,6 +101,16 @@ final class ForgeApiClient implements ForgeCapabilitiesClientInterface
             (int) $siteId,
             $this->mergeEnvironment($existing, $variables),
         );
+        try {
+            $stored = $this->parseEnvironment($this->environment($serverId, $siteId));
+            foreach ($variables as $key => $value) {
+                if (($stored[$key] ?? null) !== $value) {
+                    throw new RuntimeException('Environment readback mismatch.');
+                }
+            }
+        } catch (\Throwable) {
+            throw new RuntimeException('Forge did not confirm the requested environment configuration.');
+        }
     }
 
     public function environment(string $serverId, string $siteId): string
@@ -267,17 +277,26 @@ final class ForgeApiClient implements ForgeCapabilitiesClientInterface
     }
 
     /** @param array<string, string> $variables */
-    private function mergeEnvironment(string $existing, array $variables): string
+    /** @return array<string, string> */
+    private function parseEnvironment(string $content): array
     {
         try {
             $probe = '__SHIPPER_ENV_END_'.bin2hex(random_bytes(16));
-            $parsed = \Dotenv\Dotenv::parse($existing."\n".$probe."=1\n");
+            $parsed = \Dotenv\Dotenv::parse($content."\n".$probe."=1\n");
             if (($parsed[$probe] ?? null) !== '1') {
                 throw new RuntimeException('Incomplete environment.');
             }
+            unset($parsed[$probe]);
+            return $parsed;
         } catch (\Throwable) {
             throw new RuntimeException('Cannot parse the existing Forge site environment before updating it.');
         }
+
+    }
+
+    private function mergeEnvironment(string $existing, array $variables): string
+    {
+        $this->parseEnvironment($existing);
 
         foreach ($variables as $key => $value) {
             if (preg_match('/\A[A-Za-z_][A-Za-z0-9_]*\z/', $key) !== 1) {

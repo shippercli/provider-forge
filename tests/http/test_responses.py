@@ -12,6 +12,7 @@ class ResponsesTest(unittest.TestCase):
     def test_status_and_diagnostics(self):
         received = []
         redirected = []
+        readback_environments = {}
         partial = {'databases': [], 'environment': 'APP_ENV=production\n', 'analytics_attempts': 0}
         partial_events = []
 
@@ -24,7 +25,15 @@ class ResponsesTest(unittest.TestCase):
                 received.append((self.path, self.headers.get('Authorization'), body))
                 procedure = self.path.rsplit('/', 1)[-1]
                 case = self.headers.get('X-Fixture-Case', '')
-                if case.startswith('malformed-env-'):
+                if case.startswith('readback-env-'):
+                    if self.command == 'PUT':
+                        if case == 'readback-env-valid':
+                            readback_environments[case] = json.loads(body)['environment']
+                        envelope = {}
+                    else:
+                        envelope = {'data': {'attributes': {'content': readback_environments.get(case, 'KEEP=retained\n')}}}
+                    status, payload = 200, json.dumps(envelope).encode()
+                elif case.startswith('malformed-env-'):
                     if self.command != 'GET':
                         raise AssertionError('Malformed environment must not be updated')
                     content = {'malformed-env-double': 'TOKEN="unfinished',
@@ -168,7 +177,7 @@ class ResponsesTest(unittest.TestCase):
                     self.assertTrue(scoped[2][0].endswith('/database/schemas'))
                     self.assertTrue(scoped[3][0].endswith('/database/schemas/21'))
                     self.assertEqual(json.loads(scoped[2][1])['password'], 'literal-${PROJECT_NAME}-${PROFILE}-+%:@' if variant == 'valid-explicit' else 'synthetic-database-secret')
-                self.assertEqual(len(received), 250)
+                self.assertEqual(len(received), 258)
                 for variant in ['engine-mismatch', 'engine-unknown']:
                     scoped = [(path, body) for path, _, body in received if '/orgs/' + variant + '/' in path]
                     self.assertEqual(len(scoped), 1)

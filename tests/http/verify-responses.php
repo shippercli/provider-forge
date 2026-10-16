@@ -248,3 +248,20 @@ foreach (['double', 'single', 'name'] as $suffix) {
     }
 }
 echo "Three malformed existing environments refused before HTTP update\n";
+
+
+foreach (['valid', 'ignored'] as $mode) {
+    $sdk = new ForgeInventoryClient('synthetic-authorization-secret', new Client(['base_uri' => $argv[1].'/',
+        'headers' => ['X-Fixture-Case' => 'readback-env-'.$mode, 'Authorization' => 'Bearer synthetic-authorization-secret']]));
+    $adapter = (new ReflectionClass(\ShipperCli\ProviderForge\ForgeApiClient::class))->newInstanceWithoutConstructor();
+    (new ReflectionProperty($adapter, 'forge'))->setValue($adapter, $sdk);
+    (new ReflectionProperty($adapter, 'organizationSlug'))->setValue($adapter, 'org');
+    $failure = null;
+    try { $adapter->updateEnvironment('7', '55', ['TOKEN' => 'literal-${PROJECT_NAME}-secret', 'EMPTY' => '']); }
+    catch (RuntimeException $error) { $failure = $error; }
+    if (($failure === null) !== ($mode === 'valid')
+        || ($failure !== null && $failure->getMessage() !== 'Forge did not confirm the requested environment configuration.')) {
+        throw new RuntimeException('Environment readback acceptance incorrect');
+    }
+}
+echo "Real HTTP environment persistence readback controls passed\n";
