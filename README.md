@@ -155,3 +155,13 @@ IDs through coercion. If JSON API attributes also contain an ID, it must be
 valid and equal to the top-level identity before the SDK flattens attributes.
 This protects the collection endpoints; detail/create responses remain subject
 to their own resource checks and are not covered by this collection guard.
+
+Create responses for sites, databases, domains, background processes, scheduled
+jobs and certificates, plus active certificate/detail lookups, validate the
+original JSON object and ID before SDK hydration. Explicit API errors,
+nonobject data, malformed IDs and conflicting attribute IDs are rejected.
+Protected detail responses must match the ID in the requested URL. Certificate
+404 handling remains the sole absence signal. Validation failures do not prove
+a create request had no effect: inspect the account before retrying a creation.
+This validates response identity, not full requested configuration or completed
+provisioning. Other endpoint families retain their existing checks.

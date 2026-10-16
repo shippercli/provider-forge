@@ -61,6 +61,28 @@ final class ForgeInventoryClient extends Forge
                 }
             }
         }
+        $isCreate = \strtoupper($verb) === 'POST' && ($this->isInventoryUri($uri)
+            || \preg_match('#\Aorgs/[^/]+/servers/[0-9]+/sites/[0-9]+/domains/[0-9]+/certificates\z#', $uri) === 1);
+        $isCertificate = \strtoupper($verb) === 'GET'
+            && \preg_match('#\Aorgs/[^/]+/servers/[0-9]+/sites/[0-9]+/domains/[0-9]+/certificates/active\z#', $uri) === 1;
+        $detail = [];
+        $isDetail = \strtoupper($verb) === 'GET'
+            && \preg_match('#\A(orgs/[^/]+/servers/[0-9]+/(?:sites|database/schemas|background-processes|scheduled-jobs|sites/[0-9]+/domains))/([0-9]+)\z#', $uri, $detail) === 1;
+        if ($isCreate || $isCertificate || $isDetail) {
+            $shape = \json_decode($body);
+            $data = $shape->data ?? null;
+            $id = $data instanceof \stdClass ? $this->resourceId($data->id ?? null) : null;
+            $attributes = $data->attributes ?? null;
+            if (! $shape instanceof \stdClass || $id === null || ($shape->errors ?? []) !== []
+                || ! \in_array($shape->error ?? null, [null, '', false], true)
+                || (\property_exists($shape, 'success') && $shape->success !== true)
+                || ($attributes instanceof \stdClass && \property_exists($attributes, 'id')
+                    && $this->resourceId($attributes->id) !== $id)
+                || ($isDetail && $id !== $this->resourceId($detail[2]))) {
+                throw new RuntimeException($isCertificate ? 'Forge returned an invalid active certificate identity.'
+                    : 'Forge returned an invalid resource response envelope.');
+            }
+        }
         if ($body === '') return null;
         $decoded = json_decode($body, true);
         return $decoded === null ? $body : $decoded;

@@ -103,3 +103,39 @@ foreach (['fraction', 'boolean', 'junk', 'exponent', 'padded', 'leading-zero', '
     }
 }
 echo "37 real HTTP raw identity rejections and three valid controls passed\n";
+
+foreach (['fraction', 'shadow', 'errors', 'missing', 'list', 'null', 'valid'] as $case) {
+    foreach (['createSite', 'createDatabase', 'createDomain', 'createBackgroundProcess', 'createScheduledJob', 'createCertificate', 'activeCertificate'] as $method) {
+        $sdk = new ForgeInventoryClient('synthetic-authorization-secret', new Client(['base_uri' => $argv[1].'/',
+            'headers' => ['Authorization' => 'Bearer synthetic-authorization-secret', 'X-Fixture-Case' => 'resource-'.$case]]));
+        $adapter = (new ReflectionClass(\ShipperCli\ProviderForge\ForgeApiClient::class))->newInstanceWithoutConstructor();
+        (new ReflectionProperty($adapter, 'forge'))->setValue($adapter, $sdk);
+        (new ReflectionProperty($adapter, 'organizationSlug'))->setValue($adapter, 'org');
+        $failure = null;
+        try {
+            $result = match ($method) {
+                'createSite' => $adapter->createSite('7', ['domain' => 'fixture.test']),
+                'createDatabase' => $adapter->createDatabase('7', ['name' => 'fixture']),
+                'createDomain' => $adapter->createDomain('7', '12', ['name' => 'fixture.test']),
+                'createBackgroundProcess' => $adapter->createBackgroundProcess('7', ['command' => 'fixture']),
+                'createScheduledJob' => $adapter->createScheduledJob('7', ['command' => 'fixture']),
+                'createCertificate' => $adapter->createCertificate('7', '12', '13', []),
+                'activeCertificate' => $adapter->activeCertificate('7', '12', '13'),
+            };
+        } catch (Throwable $exception) { $failure = $exception; }
+        if ($case === 'valid') {
+            if ($failure !== null || ($method !== 'createCertificate' && ($result['id'] ?? null) !== 21)) throw new RuntimeException('Valid resource response changed');
+        } else {
+            $expected = $method === 'activeCertificate' ? 'Forge returned an invalid active certificate identity.' : 'Forge returned an invalid resource response envelope.';
+            if (!$failure instanceof RuntimeException || $failure->getMessage() !== $expected) throw new RuntimeException('Invalid resource response accepted: '.$case.'/'.$method);
+        }
+    }
+}
+foreach (['sites/21', 'database/schemas/21', 'background-processes/21', 'scheduled-jobs/21', 'sites/12/domains/21'] as $path) {
+    $sdk = new ForgeInventoryClient('synthetic-authorization-secret', new Client(['base_uri' => $argv[1].'/',
+        'headers' => ['Authorization' => 'Bearer synthetic-authorization-secret', 'X-Fixture-Case' => 'resource-foreign']]));
+    $failure = null;
+    try { $sdk->get('orgs/org/servers/7/'.$path); } catch (RuntimeException $exception) { $failure = $exception; }
+    if ($failure === null || $failure->getMessage() !== 'Forge returned an invalid resource response envelope.') throw new RuntimeException('Foreign detail identity accepted');
+}
+echo "Resource creation, certificate and matching-detail HTTP checks passed\n";
