@@ -485,6 +485,9 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
                 $prefix.'_USERNAME' => (string) $payload['user'],
                 $prefix.'_PASSWORD' => (string) $payload['password'],
             ];
+            if ($siteId !== '') {
+                $client->updateEnvironment($this->getServerId(), $siteId, $this->generatedEnvironment);
+            }
         }
     }
 

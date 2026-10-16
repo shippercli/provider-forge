@@ -12,6 +12,8 @@ class ResponsesTest(unittest.TestCase):
     def test_status_and_diagnostics(self):
         received = []
         redirected = []
+        partial = {'databases': [], 'environment': 'APP_ENV=production\n', 'analytics_attempts': 0}
+        partial_events = []
 
         class Handler(http.server.BaseHTTPRequestHandler):
             def log_message(self, *_args):
@@ -22,7 +24,37 @@ class ResponsesTest(unittest.TestCase):
                 received.append((self.path, self.headers.get('Authorization'), body))
                 procedure = self.path.rsplit('/', 1)[-1]
                 case = self.headers.get('X-Fixture-Case', '')
-                if case.startswith('database-create-'):
+                if case == 'partial-recovery':
+                    path = urlsplit(self.path).path
+                    status = 200
+                    if path.endswith('/servers/7'):
+                        envelope = {'data': {'id': '7', 'type': 'servers', 'attributes': {'database_type': 'mysql84'}}}
+                    elif path.endswith('/environment'):
+                        if self.command == 'PUT':
+                            partial['environment'] = json.loads(body)['environment']
+                            partial_events.append('deliver')
+                            envelope = {}
+                        else:
+                            envelope = {'data': {'attributes': {'content': partial['environment']}}}
+                    elif self.command == 'POST':
+                        request = json.loads(body)
+                        name = request['name']
+                        partial_events.append('create:' + name)
+                        if name == 'analytics': partial['analytics_attempts'] += 1
+                        if name == 'analytics' and partial['analytics_attempts'] == 1:
+                            status, envelope = 500, {'message': 'synthetic second creation failure'}
+                        else:
+                            record = {'id': '21' if name == 'main' else '22', 'type': 'databases',
+                                      'attributes': {'name': name, 'status': 'installed'}}
+                            partial['databases'].append(record)
+                            envelope = {'data': record}
+                    elif path.endswith('/database/schemas'):
+                        envelope = {'data': partial['databases'], 'meta': {'next_cursor': None}}
+                    else:
+                        identity = path.rsplit('/', 1)[-1]
+                        envelope = {'data': next(row for row in partial['databases'] if row['id'] == identity)}
+                    payload = json.dumps(envelope).encode()
+                elif case.startswith('database-create-'):
                     variant = case.removeprefix('database-create-')
                     if self.command == 'GET' and urlsplit(self.path).path.endswith('/servers/7'):
                         engine = 'postgres18' if variant == 'engine-mismatch' else 'unknown' if variant == 'engine-unknown' else 'mysql84'
@@ -111,6 +143,7 @@ class ResponsesTest(unittest.TestCase):
                 self.wfile.write(payload)
 
             do_GET = do_POST
+            do_PUT = do_POST
 
         with http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler) as server:
             thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -119,6 +152,7 @@ class ResponsesTest(unittest.TestCase):
                 result = subprocess.run(['php', str(Path(__file__).with_name('verify-responses.php')), f'http://127.0.0.1:{server.server_port}'], capture_output=True, text=True, timeout=15)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertEqual(redirected, [])
+                self.assertEqual(partial_events, ['create:main', 'deliver', 'create:analytics', 'create:analytics', 'deliver'])
                 for variant in ['valid', 'valid-explicit', 'foreign', 'missing-name']:
                     scoped = [(path, body) for path, _, body in received if '/orgs/' + variant + '/' in path]
                     self.assertEqual(len(scoped), 4)
@@ -127,7 +161,7 @@ class ResponsesTest(unittest.TestCase):
                     self.assertTrue(scoped[2][0].endswith('/database/schemas'))
                     self.assertTrue(scoped[3][0].endswith('/database/schemas/21'))
                     self.assertEqual(json.loads(scoped[2][1])['password'], 'literal-${PROJECT_NAME}-${PROFILE}-+%:@' if variant == 'valid-explicit' else 'synthetic-database-secret')
-                self.assertEqual(len(received), 231)
+                self.assertEqual(len(received), 247)
                 for variant in ['engine-mismatch', 'engine-unknown']:
                     scoped = [(path, body) for path, _, body in received if '/orgs/' + variant + '/' in path]
                     self.assertEqual(len(scoped), 1)

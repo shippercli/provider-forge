@@ -200,3 +200,35 @@ foreach (['valid', 'valid-explicit', 'foreign', 'missing-name', 'engine-mismatch
     }
 }
 echo "Six real HTTP provider database creation/engine cases passed\n";
+
+
+$partialSdk = new ForgeInventoryClient('synthetic-authorization-secret', new Client([
+    'base_uri' => $argv[1].'/', 'headers' => ['X-Fixture-Case' => 'partial-recovery', 'Authorization' => 'Bearer synthetic-authorization-secret'],
+]));
+$partialAdapter = (new ReflectionClass(\ShipperCli\ProviderForge\ForgeApiClient::class))->newInstanceWithoutConstructor();
+(new ReflectionProperty($partialAdapter, 'forge'))->setValue($partialAdapter, $partialSdk);
+(new ReflectionProperty($partialAdapter, 'organizationSlug'))->setValue($partialAdapter, 'partial');
+$partialProject = new class {
+    public function databases(): array { return array_map(static fn ($name) => new class($name) {
+        public function __construct(private string $name) {}
+        public function name(): string { return $this->name; }
+        public function user(): string { return $this->name.'_user'; }
+    }, ['main', 'analytics']); }
+};
+$partialOptions = ['server_id' => 7, 'database_password' => 'literal-${PROJECT_NAME}-${PROFILE}',
+    'database_environment_prefixes' => ['main' => 'DB', 'analytics' => 'ANALYTICS_DB']];
+$partialFailure = null;
+try {
+    $provider = new \ShipperCli\ProviderForge\ForgeProvider($partialOptions);
+    (new ReflectionMethod($provider, 'applyDatabases'))->invoke($provider, $partialAdapter, $partialProject, new stdClass, '55');
+} catch (Throwable $error) { $partialFailure = $error; }
+$partialEnvironment = \Dotenv\Dotenv::parse($partialAdapter->environment('7', '55'));
+if ($partialFailure === null || ($partialEnvironment['DB_PASSWORD'] ?? null) !== $partialOptions['database_password']
+    || isset($partialEnvironment['ANALYTICS_DB_PASSWORD'])) throw new RuntimeException('Confirmed first connection was lost after later creation failure');
+$retryProvider = new \ShipperCli\ProviderForge\ForgeProvider($partialOptions);
+(new ReflectionMethod($retryProvider, 'applyDatabases'))->invoke($retryProvider, $partialAdapter, $partialProject, new stdClass, '55');
+$finalEnvironment = \Dotenv\Dotenv::parse($partialAdapter->environment('7', '55'));
+if (($finalEnvironment['DB_PASSWORD'] ?? null) !== $partialOptions['database_password']
+    || ($finalEnvironment['ANALYTICS_DB_PASSWORD'] ?? null) !== $partialOptions['database_password']
+    || ($finalEnvironment['APP_ENV'] ?? null) !== 'production') throw new RuntimeException('Partial database retry did not preserve connection values');
+echo "Confirmed first connection survives second creation failure and fresh provider retry over real HTTP\n";

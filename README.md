@@ -213,3 +213,18 @@ cannot prevent a later concurrent server change; live connectivity remains a
 separate verification step.
 
 API reference: <https://forge.laravel.com/api/docs.openapi> (checked 2026-10-16).
+
+### Partial database provisioning
+
+During normal apply, each confirmed new database connection is delivered to the
+site environment before the next database is provisioned. If a later database
+fails, already delivered credentials remain available to a fresh apply attempt;
+existing unrelated environment values are retained. A failed environment update
+stops further creation. This is incremental application state, not an atomic
+multi-database transaction: a connection may become visible before later steps
+succeed, and earlier resources are not automatically rolled back.
+
+Creation followed by a failed or ambiguous credential-delivery request still
+requires recovery review. No durable secret journal or cross-operation lock is
+provided by this change. Keep explicitly configured passwords in a secret
+manager and do not delete/recreate production data to bypass missing credentials.

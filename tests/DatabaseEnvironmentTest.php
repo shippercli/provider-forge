@@ -195,3 +195,60 @@ it('rejects invalid explicit Forge passwords before database inventory or creati
     expect($provider->apply(forgeDatabaseProject(), $profile))->toBeFalse()
         ->and($provider->getLastError())->toContain('Explicit Forge database passwords must be nonempty strings.');
 })->with([[''], [null], [false], [123]]);
+
+it('delivers a confirmed Forge connection before provisioning later databases', function (): void {
+    $client = $this->createMock(ForgeCapabilitiesClientInterface::class);
+    $client->method('serverDatabaseType')->willReturn('mysql84');
+    $client->method('databases')->willReturn([]);
+    $events = [];
+    $password = null;
+    $persisted = [];
+    $client->expects($this->exactly(2))->method('createDatabase')->willReturnCallback(function ($server, $payload) use (&$events, &$password): array {
+        $events[] = 'create:'.$payload['name'];
+        if ($payload['name'] === 'analytics') throw new RuntimeException('Synthetic second database failure');
+        $password = $payload['password'];
+        return ['id' => 21, 'name' => 'main'];
+    });
+    $client->expects($this->once())->method('updateEnvironment')->with('7', '55', $this->anything())
+        ->willReturnCallback(function ($server, $site, $values) use (&$events, &$persisted): void {
+            $events[] = 'deliver';
+            $persisted = $values;
+        });
+    $provider = new ForgeProvider(['server_id' => 7, 'database_environment_prefixes' => ['main' => 'DB', 'analytics' => 'ANALYTICS_DB']]);
+    $failure = null;
+    try {
+        (new ReflectionMethod($provider, 'applyDatabases'))->invoke($provider, $client, forgeDatabaseProject(), new stdClass, '55');
+    } catch (RuntimeException $error) { $failure = $error; }
+    expect($failure?->getMessage())->toBe('Synthetic second database failure')
+        ->and($events)->toBe(['create:main', 'deliver', 'create:analytics'])
+        ->and($persisted['DB_PASSWORD'] ?? null)->toBe($password)
+        ->and($persisted['DB_DATABASE'] ?? null)->toBe('main')
+        ->and($persisted)->not->toHaveKey('ANALYTICS_DB_PASSWORD');
+    $retry = $this->createMock(ForgeCapabilitiesClientInterface::class);
+    $retry->method('serverDatabaseType')->willReturn('mysql84');
+    $retry->method('databases')->willReturn([['id' => 21, 'name' => 'main']]);
+    $retry->expects($this->once())->method('environment')->with('7', '55')->willReturn(
+        "DB_HOST=127.0.0.1\nDB_DATABASE=main\nDB_USERNAME=api_profile_main\nDB_PASSWORD=".$password,
+    );
+    $retry->expects($this->once())->method('createDatabase')->willReturnCallback(function ($server, $payload): array {
+        expect($payload['name'])->toBe('analytics');
+        return ['id' => 22, 'name' => 'analytics'];
+    });
+    $retry->expects($this->once())->method('updateEnvironment')->willReturnCallback(function ($server, $site, $values) use (&$persisted): void {
+        $persisted = [...$persisted, ...$values];
+    });
+    $retryProvider = new ForgeProvider(['server_id' => 7, 'database_environment_prefixes' => ['main' => 'DB', 'analytics' => 'ANALYTICS_DB']]);
+    (new ReflectionMethod($retryProvider, 'applyDatabases'))->invoke($retryProvider, $retry, forgeDatabaseProject(), new stdClass, '55');
+    expect($persisted['DB_PASSWORD'])->toBe($password)->and($persisted['ANALYTICS_DB_DATABASE'])->toBe('analytics');
+});
+
+it('stops further Forge database creation when connection delivery fails', function (): void {
+    $client = $this->createMock(ForgeCapabilitiesClientInterface::class);
+    $client->method('serverDatabaseType')->willReturn('mysql84');
+    $client->method('databases')->willReturn([]);
+    $client->expects($this->once())->method('createDatabase')->willReturn(['id' => 21, 'name' => 'main']);
+    $client->expects($this->once())->method('updateEnvironment')->willThrowException(new RuntimeException('Synthetic delivery failure'));
+    $provider = new ForgeProvider(['server_id' => 7, 'database_environment_prefixes' => ['main' => 'DB', 'analytics' => 'ANALYTICS_DB']]);
+    expect(fn () => (new ReflectionMethod($provider, 'applyDatabases'))->invoke($provider, $client, forgeDatabaseProject(), new stdClass, '55'))
+        ->toThrow(RuntimeException::class, 'Synthetic delivery failure');
+});
