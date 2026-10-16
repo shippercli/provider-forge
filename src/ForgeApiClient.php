@@ -224,9 +224,9 @@ final class ForgeApiClient implements ForgeCapabilitiesClientInterface
                 throw new \InvalidArgumentException('Invalid environment variable name.');
             }
             $line = $key.'='.$this->dotenvValue($value);
-            $pattern = '/^'.preg_quote($key, '/').'=.*$/m';
+            $pattern = '/^(?:export[ \t]+)?'.preg_quote($key, '/').'[ \t]*=[ \t]*(?:"(?:\\\\.|[^"\\\\])*"|\x27[^\x27]*\x27|[^\r\n]*)[^\r\n]*(?:\r?\n|$)/m';
             if (preg_match($pattern, $existing) === 1) {
-                $existing = (string) preg_replace_callback($pattern, static fn (): string => $line, $existing);
+                $existing = (string) preg_replace_callback($pattern, static fn (): string => $line."\n", $existing);
             } else {
                 $existing = rtrim($existing, "\n")."\n".$line."\n";
             }
@@ -237,7 +237,7 @@ final class ForgeApiClient implements ForgeCapabilitiesClientInterface
 
     private function dotenvValue(string $value): string
     {
-        if (preg_match('/[\s#=\\"\x27$]/', $value) !== 1) {
+        if (preg_match('/[\s#=\\\\"\x27$]/', $value) !== 1) {
             return $value;
         }
 

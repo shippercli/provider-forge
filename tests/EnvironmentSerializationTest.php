@@ -24,3 +24,20 @@ it('rejects environment names that could inject additional assignments', functio
     $client = (new ReflectionClass(ForgeApiClient::class))->newInstanceWithoutConstructor();
     (new ReflectionMethod($client, 'mergeEnvironment'))->invoke($client, '', ["BAD\nNAME" => 'value']);
 })->throws(InvalidArgumentException::class);
+
+it('replaces complete multiline and exported assignments while preserving other content', function (): void {
+    $client = (new ReflectionClass(ForgeApiClient::class))->newInstanceWithoutConstructor();
+    $existing = "# retained comment\nexport TOKEN = \"old\nvalue\"\nKEEP='untouched'\n";
+    $result = (new ReflectionMethod($client, 'mergeEnvironment'))->invoke($client, $existing, [
+        'TOKEN' => 'replacement',
+        'PATH_VALUE' => 'C:\\deployment\\app',
+        'SECRET' => "literal\$value # with \"quotes\"\nand newline",
+    ]);
+
+    expect(\Dotenv\Dotenv::parse($result))->toBe([
+        'TOKEN' => 'replacement',
+        'KEEP' => 'untouched',
+        'PATH_VALUE' => 'C:\\deployment\\app',
+        'SECRET' => "literal\$value # with \"quotes\"\nand newline",
+    ])->and($result)->toContain('# retained comment');
+});
