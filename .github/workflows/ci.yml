@@ -7,16 +7,50 @@ on:
     branches: [main]
   workflow_dispatch:
 
-jobs:
-  test:
-    runs-on: ubuntu-latest
+permissions:
+  contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  php:
+    name: PHP ${{ matrix.php }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.3', '8.4', '8.5']
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.3'
+          php-version: ${{ matrix.php }}
+          tools: composer:v2
           coverage: none
-      - run: composer install --no-interaction --prefer-dist
-      - run: composer test
-      - run: python3 tests/http/test_responses.py
+      - name: Validate package
+        run: composer validate --strict
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist
+      - name: Validate optimized autoloading
+        run: composer dump-autoload --optimize --strict-psr
+      - name: Run tests
+        run: composer test
+      - name: Verify real HTTP transport policy
+        run: python3 tests/http/test_responses.py
+      - name: Audit dependencies
+        run: composer audit --locked --no-interaction
+
+  test:
+    name: test
+    needs: php
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require all PHP matrix jobs to succeed
+        env:
+          MATRIX_RESULT: ${{ needs.php.result }}
+        run: test "$MATRIX_RESULT" = success
