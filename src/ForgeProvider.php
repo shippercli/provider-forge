@@ -54,7 +54,7 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
     {
         $errors = [];
         try {
-            $this->databaseEnvironmentPrefixes($project);
+            $this->databaseEnvironmentPrefixes($project, $profile);
         } catch (\InvalidArgumentException $exception) {
             $errors[] = $exception->getMessage();
         }
@@ -81,6 +81,7 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
 
     public function plan(object $project, object $profile): array
     {
+        $this->databaseEnvironmentPrefixes($project, $profile);
         $serverId = $this->getServerId();
         $domainValue = $this->profileValue($profile, 'domain');
         $domain = \is_string($domainValue) ? $domainValue : '';
@@ -374,7 +375,7 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
             return;
         }
 
-        $prefixes = $this->databaseEnvironmentPrefixes($project);
+        $prefixes = $this->databaseEnvironmentPrefixes($project, $profile);
         $existing = $client->databases($this->getServerId());
         foreach ($project->databases() as $database) {
             if (! method_exists($database, 'name')) {
@@ -415,7 +416,7 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
     }
 
     /** @return array<string, string> */
-    private function databaseEnvironmentPrefixes(object $project): array
+    private function databaseEnvironmentPrefixes(object $project, object $profile): array
     {
         $databases = method_exists($project, 'databases')
             ? $project->databases() : [];
@@ -424,11 +425,17 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
             throw new \InvalidArgumentException('Forge database_environment_prefixes must be a map of database names to environment prefixes.');
         }
         $prefixes = [];
+        $resolvedNames = [];
         foreach ($databases as $database) {
             if (! \is_object($database) || ! \method_exists($database, 'name')) {
                 throw new \InvalidArgumentException('Forge database declarations require a name.');
             }
             $name = $database->name();
+            $resolved = $this->interpolateDatabaseName($name, $this->projectName($project), $this->profileName($profile));
+            if (\in_array($resolved, $resolvedNames, true)) {
+                throw new \InvalidArgumentException('Resolved Forge database names must be unique.');
+            }
+            $resolvedNames[] = $resolved;
             $prefix = $configured[$name] ?? (\count($databases) === 1 ? 'DB' : null);
             if (! \is_string($prefix) || \preg_match('/\A[A-Z_][A-Z0-9_]*\z/', $prefix) !== 1) {
                 throw new \InvalidArgumentException("Forge database {$name} requires a valid database_environment_prefixes entry when multiple databases are declared.");

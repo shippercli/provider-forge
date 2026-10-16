@@ -69,3 +69,25 @@ it('requires existing Forge database credentials without creating or rotating da
     ["DB_HOST=127.0.0.1\nDB_DATABASE=other\nDB_USERNAME=api\nDB_PASSWORD=retained-secret", false],
     ["DB_PASSWORD=\"unterminated", false],
 ]);
+
+
+it('rejects Forge database names that collide after interpolation before API access', function (): void {
+    $project = new class {
+        public function name(): string { return 'api'; }
+        public function databases(): array { return array_map(static fn (string $name): object => new class($name) {
+            public function __construct(private string $databaseName) {}
+            public function name(): string { return $this->databaseName; }
+        }, ['${PROJECT_NAME}_${PROFILE}', 'api_production']); }
+    };
+    $profile = new class { public function name(): string { return 'production'; } };
+    $client = $this->createMock(ForgeCapabilitiesClientInterface::class);
+    $client->expects($this->never())->method('databases');
+    $client->expects($this->never())->method('createDatabase');
+    $provider = new ForgeProvider(['server_id' => 7, 'database_environment_prefixes' => ['${PROJECT_NAME}_${PROFILE}' => 'DB', 'api_production' => 'OTHER_DB']]);
+    expect(fn () => (new ReflectionMethod($provider, 'applyDatabases'))->invoke($provider, $client, $project, $profile))
+        ->toThrow(InvalidArgumentException::class, 'Resolved Forge database names must be unique.');
+    expect($provider->validate($project, $profile))->toContain('Resolved Forge database names must be unique.');
+    expect(fn () => $provider->plan($project, $profile))->toThrow(InvalidArgumentException::class, 'Resolved Forge database names must be unique.');
+    expect($provider->apply($project, $profile))->toBeFalse()
+        ->and($provider->getLastError())->toContain('Resolved Forge database names must be unique.');
+});
