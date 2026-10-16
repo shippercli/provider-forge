@@ -68,7 +68,13 @@ The second database supplies `ANALYTICS_DB_HOST`, `ANALYTICS_DB_DATABASE`,
 `ANALYTICS_DB_USERNAME`, and `ANALYTICS_DB_PASSWORD`. The application must be
 configured to consume those variables. `database_host` defaults to `127.0.0.1`;
 set it explicitly if the server's database endpoint differs. Each database gets
-an independent generated password unless `database_password` is explicitly set.
+an independent generated password unless a password is configured. An application
+`<PREFIX>_PASSWORD` (such as `DB_PASSWORD`) takes precedence over the provider-wide
+`database_password` fallback; profile application values override project values.
+The selected password is sent unchanged to creation and application delivery.
+Explicit per-database passwords must be nonempty strings; invalid values fail
+before provisioning. Database names, users and hosts remain declaration/provider
+controlled.
 Re-apply leaves existing database passwords unchanged and merges configured
 environment variables into the site's existing environment. Existing database
 credentials must already be available in the existing site environment or its

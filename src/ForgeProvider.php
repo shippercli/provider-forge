@@ -55,6 +55,7 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
         $errors = [];
         try {
             $this->databaseEnvironmentPrefixes($project, $profile);
+            $this->configuredDatabasePasswords($project, $profile);
         } catch (\InvalidArgumentException $exception) {
             $errors[] = $exception->getMessage();
         }
@@ -82,6 +83,7 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
     public function plan(object $project, object $profile): array
     {
         $this->databaseEnvironmentPrefixes($project, $profile);
+        $this->configuredDatabasePasswords($project, $profile);
         $serverId = $this->getServerId();
         $domainValue = $this->profileValue($profile, 'domain');
         $domain = \is_string($domainValue) ? $domainValue : '';
@@ -369,6 +371,24 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
         $this->applySsl($client, $project, $serverId, $siteId, $domain);
     }
 
+    /** @return array<string, string> */
+    private function configuredDatabasePasswords(object $project, object $profile): array
+    {
+        $configured = $this->configuredEnvironment($project, $profile);
+        $passwords = [];
+        foreach ($this->databaseEnvironmentPrefixes($project, $profile) as $prefix) {
+            $key = $prefix.'_PASSWORD';
+            if (! array_key_exists($key, $configured)) {
+                continue;
+            }
+            if (! is_string($configured[$key]) || $configured[$key] === '') {
+                throw new \InvalidArgumentException('Explicit Forge database passwords must be nonempty strings.');
+            }
+            $passwords[$key] = $configured[$key];
+        }
+        return $passwords;
+    }
+
     private function applyDatabases(ForgeCapabilitiesClientInterface $client, object $project, object $profile, string $siteId = ''): void
     {
         if (! method_exists($project, 'databases')) {
@@ -376,6 +396,7 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
         }
 
         $prefixes = $this->databaseEnvironmentPrefixes($project, $profile);
+        $configuredPasswords = $this->configuredDatabasePasswords($project, $profile);
         $existing = $client->databases($this->getServerId());
         foreach ($project->databases() as $database) {
             if (! method_exists($database, 'name')) {
@@ -402,7 +423,8 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
                 'name' => $name,
                 'type' => method_exists($database, 'type') ? $database->type() : 'mysql',
                 'user' => $username,
-                'password' => (string) ($this->config['database_password'] ?? bin2hex(random_bytes(16))),
+                'password' => $configuredPasswords[$prefixes[$database->name()].'_PASSWORD']
+                    ?? (string) ($this->config['database_password'] ?? bin2hex(random_bytes(16))),
             ];
             $created = $client->createDatabase($this->getServerId(), $payload);
             $createdId = $created['id'] ?? null;

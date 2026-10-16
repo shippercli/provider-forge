@@ -134,3 +134,54 @@ it('checks database names after actual Forge SDK response hydration', function (
             ->and($environment)->toBe([]);
     }
 })->with([['main', true], ['foreign', false]]);
+
+it('uses explicit Forge passwords before provider-wide defaults without changing secret bytes', function (): void {
+    $secret = 'literal-${PROJECT_NAME}-${PROFILE}-+%:@';
+    $profile = new class($secret) {
+        public function __construct(private string $secret) {}
+        public function environment(): object { return new class($this->secret) {
+            public function __construct(private string $secret) {}
+            public function variables(): array { return ['DB_PASSWORD' => $this->secret]; }
+        }; }
+    };
+    $project = new class {
+        public function name(): string { return 'api'; }
+        public function databases(): array { return forgeDatabaseProject()->databases(); }
+        public function environment(): object { return new class {
+            public function variables(): array { return ['DB_PASSWORD' => 'project-default']; }
+        }; }
+    };
+    $client = $this->createMock(ForgeCapabilitiesClientInterface::class);
+    $client->expects($this->once())->method('databases')->willReturn([]);
+    $passwords = [];
+    $client->expects($this->exactly(2))->method('createDatabase')->willReturnCallback(function ($server, $payload) use (&$passwords): array {
+        $passwords[$payload['name']] = $payload['password'];
+        return ['id' => count($passwords), 'name' => $payload['name']];
+    });
+    $provider = new ForgeProvider(['server_id' => 7, 'database_password' => 'provider-default',
+        'database_environment_prefixes' => ['main' => 'DB', 'analytics' => 'ANALYTICS_DB']]);
+    (new ReflectionMethod($provider, 'applyDatabases'))->invoke($provider, $client, $project, $profile);
+    $environment = (new ReflectionProperty($provider, 'generatedEnvironment'))->getValue($provider);
+    expect($passwords['main'])->toBe($secret)->and($environment['DB_PASSWORD'])->toBe($secret)
+        ->and($passwords['analytics'])->toBe('provider-default')
+        ->and($environment['ANALYTICS_DB_PASSWORD'])->toBe('provider-default');
+});
+
+it('rejects invalid explicit Forge passwords before database inventory or creation', function (mixed $password): void {
+    $profile = new class($password) {
+        public function __construct(private mixed $password) {}
+        public function environment(): object { return new class($this->password) {
+            public function __construct(private mixed $password) {}
+            public function variables(): array { return ['ANALYTICS_DB_PASSWORD' => $this->password]; }
+        }; }
+    };
+    $client = $this->createMock(ForgeCapabilitiesClientInterface::class);
+    $client->expects($this->never())->method('databases');
+    $client->expects($this->never())->method('createDatabase');
+    $provider = new ForgeProvider(['server_id' => 7, 'database_environment_prefixes' => ['main' => 'DB', 'analytics' => 'ANALYTICS_DB']]);
+    expect(fn () => (new ReflectionMethod($provider, 'applyDatabases'))->invoke($provider, $client, forgeDatabaseProject(), $profile))
+        ->toThrow(InvalidArgumentException::class, 'Explicit Forge database passwords must be nonempty strings.');
+    expect($provider->validate(forgeDatabaseProject(), $profile))->toContain('Explicit Forge database passwords must be nonempty strings.');
+    expect($provider->apply(forgeDatabaseProject(), $profile))->toBeFalse()
+        ->and($provider->getLastError())->toContain('Explicit Forge database passwords must be nonempty strings.');
+})->with([[''], [null], [false], [123]]);
