@@ -20,8 +20,16 @@ does not delete databases automatically.
 
 ## Installation
 
+Install the Forge provider from GitHub alongside Shipper CLI 1.0.5 or later
+in your deployment workspace. This provider requires Forge SDK 4.
+
+If the deployment workspace has no `composer.json`, run
+`composer init --name=local/shipper-deployment --no-interaction` first.
+
 ```bash
-composer global require shippercli/provider-forge
+composer config repositories.shipper-forge git https://github.com/shippercli/provider-forge.git
+composer require 'shippercli/cli:^1.0.5' 'shippercli/provider-forge:dev-main'
+vendor/bin/shipper --version
 ```
 
 ## Requirements
