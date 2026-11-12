@@ -22,5 +22,5 @@
     "server_id": 1337,
     "deployment_timeout": 300
   },
-  "install": "composer require shippercli/provider-forge"
+  "install": "composer config repositories.shipper-forge git https://github.com/shippercli/provider-forge.git\ncomposer require 'shippercli/cli:^1.0.5' 'shippercli/provider-forge:^1.0'"
 }
