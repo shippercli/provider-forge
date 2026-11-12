@@ -484,15 +484,29 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
                 continue;
             }
             $name = $this->interpolateDatabaseName($database->name(), $this->projectName($project), $this->profileName($profile));
-            $username = method_exists($database, 'user') ? $this->interpolateDatabaseName($database->user(), $this->projectName($project), $this->profileName($profile)) : $name;
+            $declaredUsername = method_exists($database, 'user') ? $database->user() : $name;
+            $username = $this->interpolateDatabaseName($declaredUsername, $this->projectName($project), $this->profileName($profile));
+            $prefix = $prefixes[$database->name()];
+            $ownershipKey = $this->databaseOwnershipKey($name);
+            $ownershipMarker = $this->databaseOwnershipMarker($project, $profile, $name);
+            $host = (string) ($this->config['database_host'] ?? '127.0.0.1');
+            $pendingKey = 'SHIPPERCLI_DB_PENDING_'.strtoupper(hash('sha256', json_encode(
+                [$ownershipMarker, $username, $host, $prefix],
+                JSON_THROW_ON_ERROR,
+            )));
+            try {
+                $storedEnvironment = $siteId === '' ? [] : $this->parseCompleteEnvironment($client->environment($this->getServerId(), $siteId));
+                $configuredEnvironment = $this->configuredEnvironment($project, $profile);
+            } catch (\Throwable) {
+                throw new RuntimeException('Cannot read or parse the Forge site environment before database provisioning.');
+            }
+            $pendingPassword = $storedEnvironment[$pendingKey] ?? null;
+            $hasPendingPassword = is_string($pendingPassword) && $pendingPassword !== '';
+            $configuredPassword = $configuredPasswords[$prefix.'_PASSWORD'] ?? $this->config['database_password'] ?? null;
+            if ($hasPendingPassword && $configuredPassword !== null && $pendingPassword !== (string) $configuredPassword) {
+                throw new RuntimeException("Forge database {$name} has a pending creation with a different password.");
+            }
             if ($this->resourceByName($existing, $name) !== null) {
-                try {
-                    $storedEnvironment = $this->parseCompleteEnvironment($client->environment($this->getServerId(), $siteId));
-                    $configuredEnvironment = $this->configuredEnvironment($project, $profile);
-                } catch (\Throwable) {
-                    throw new RuntimeException('Cannot read or parse the Forge site environment before reusing an existing database.');
-                }
-                $prefix = $prefixes[$database->name()];
                 foreach (['_HOST', '_DATABASE', '_USERNAME', '_PASSWORD'] as $suffix) {
                     $key = $prefix.$suffix;
                     if (array_key_exists($key, $storedEnvironment)
@@ -502,31 +516,67 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
                     }
                 }
                 $available = [...$storedEnvironment, ...$configuredEnvironment];
+                $hostKey = $prefix.'_HOST';
+                $legacyHost = $this->config['database_host'] ?? null;
+                $owned = $this->hasDatabaseOwnership($storedEnvironment, $project, $profile, $name, 'created')
+                    || $this->hasDatabaseOwnership($storedEnvironment, $project, $profile, $name, 'adopted');
+                $restoreLegacyHost = $siteId !== '' && ! $owned && ! array_key_exists($hostKey, $available)
+                    && is_string($legacyHost) && trim($legacyHost) !== ''
+                    && $this->databaseAdoptionAuthorized($project, $profile, $name);
+                if ($restoreLegacyHost) {
+                    $available[$hostKey] = $legacyHost;
+                }
+                $recoverPending = ! $owned && $hasPendingPassword
+                    && $this->databaseAdoptionAuthorized($project, $profile, $name);
+                if ($recoverPending) {
+                    $available += [
+                        $hostKey => $host,
+                        $prefix.'_DATABASE' => $name,
+                        $prefix.'_USERNAME' => $username,
+                        $prefix.'_PASSWORD' => $pendingPassword,
+                    ];
+                    if ($available[$prefix.'_PASSWORD'] !== $pendingPassword) {
+                        throw new RuntimeException("Forge database {$name} has conflicting pending connection settings.");
+                    }
+                }
+                $availableUsername = $available[$prefix.'_USERNAME'] ?? null;
+                $legacyUsernameMatches = ! $recoverPending && $declaredUsername !== $username
+                    && $availableUsername === $declaredUsername
+                    && ($this->hasDatabaseOwnership($storedEnvironment, $project, $profile, $name, 'adopted')
+                        || (! $owned && $this->databaseAdoptionAuthorized($project, $profile, $name)));
                 if (($available[$prefix.'_DATABASE'] ?? null) !== $name
-                    || ($available[$prefix.'_USERNAME'] ?? null) !== $username
+                    || ($availableUsername !== $username && ! $legacyUsernameMatches)
                     || ! is_string($available[$prefix.'_HOST'] ?? null) || $available[$prefix.'_HOST'] === ''
                     || ! is_string($available[$prefix.'_PASSWORD'] ?? null) || $available[$prefix.'_PASSWORD'] === '') {
                     throw new RuntimeException("Existing Forge database {$name} requires matching {$prefix} connection settings and a password in the application environment.");
                 }
                 if ($siteId !== '') {
-                    if ($this->hasDatabaseOwnership($storedEnvironment, $project, $profile, $name, 'created')
-                        || $this->hasDatabaseOwnership($storedEnvironment, $project, $profile, $name, 'adopted')) {
+                    if ($owned) {
                         continue;
                     }
                     if (! $this->databaseAdoptionAuthorized($project, $profile, $name)) {
                         throw new RuntimeException("Existing Forge database {$name} requires exact-scope adoption consent.");
                     }
-                    $this->generatedEnvironment[$this->databaseOwnershipKey($name)] = 'adopted:'.$this->databaseOwnershipMarker($project, $profile, $name);
+                    if ($restoreLegacyHost) {
+                        $this->generatedEnvironment[$hostKey] = $legacyHost;
+                    }
+                    if ($recoverPending) {
+                        foreach (['_HOST', '_DATABASE', '_USERNAME', '_PASSWORD'] as $suffix) {
+                            $key = $prefix.$suffix;
+                            $this->generatedEnvironment[$key] = $available[$key];
+                        }
+                        $this->generatedEnvironment[$pendingKey] = '';
+                    }
+                    $this->generatedEnvironment[$ownershipKey] = 'adopted:'.$ownershipMarker;
                     $client->updateEnvironment($this->getServerId(), $siteId, $this->generatedEnvironment);
                 }
                 continue;
             }
-            $payload = [
-                'name' => $name,
-                'user' => $username,
-                'password' => $configuredPasswords[$prefixes[$database->name()].'_PASSWORD']
-                    ?? (string) ($this->config['database_password'] ?? bin2hex(random_bytes(16))),
-            ];
+            $password = $hasPendingPassword ? $pendingPassword : (string) ($configuredPassword ?? bin2hex(random_bytes(16)));
+            if ($siteId !== '' && ! $hasPendingPassword) {
+                $client->updateEnvironment($this->getServerId(), $siteId, [$pendingKey => $password]);
+            }
+            $payload = ['name' => $name, 'user' => $username, 'password' => $password];
             $created = $client->createDatabase($this->getServerId(), $payload);
             $createdId = $created['id'] ?? null;
             $validId = (is_int($createdId) && $createdId > 0)
@@ -535,17 +585,16 @@ final class ForgeProvider implements DeploymentLogsProviderInterface, Deployment
             if (! $validId || ($created['name'] ?? null) !== $name) {
                 throw new RuntimeException('Forge did not confirm the requested database creation identity.');
             }
-            $prefix = $prefixes[$database->name()];
             $this->generatedEnvironment = [...$this->generatedEnvironment,
-                $this->databaseOwnershipKey($name) => 'created:'.$this->databaseOwnershipMarker($project, $profile, $name),
-                $prefix.'_HOST' => (string) ($this->config['database_host'] ?? '127.0.0.1'),
+                $ownershipKey => 'created:'.$ownershipMarker,
+                $prefix.'_HOST' => $host,
                 $prefix.'_DATABASE' => $name,
                 $prefix.'_USERNAME' => (string) $payload['user'],
                 $prefix.'_PASSWORD' => (string) $payload['password'],
             ];
             if ($siteId !== '') {
                 $existing[] = ['name' => $name];
-                $client->updateEnvironment($this->getServerId(), $siteId, $this->generatedEnvironment);
+                $client->updateEnvironment($this->getServerId(), $siteId, [...$this->generatedEnvironment, $pendingKey => '']);
             }
         }
     }

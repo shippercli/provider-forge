@@ -3,9 +3,10 @@
 use ShipperCli\ProviderForge\ForgeCapabilitiesClientInterface;
 use ShipperCli\ProviderForge\ForgeProvider;
 
-function forgeDatabaseProject(): object
+function forgeDatabaseProject(array $names = ['main', 'analytics']): object
 {
-    return new class {
+    return new class($names) {
+        public function __construct(private array $names) {}
         public function name(): string { return 'api'; }
         public function databases(): array {
             return array_map(static fn (string $name): object => new class($name) {
@@ -13,7 +14,7 @@ function forgeDatabaseProject(): object
                 public function name(): string { return $this->database; }
                 public function user(): string { return '${PROJECT_NAME}_${PROFILE}_'.$this->database; }
                 public function type(): string { return 'mysql'; }
-            }, ['main', 'analytics']);
+            }, $this->names);
         }
     };
 }
@@ -46,7 +47,7 @@ it('rejects ambiguous Forge database mappings before provider calls', function (
     (new ReflectionMethod($provider, 'applyDatabases'))->invoke($provider, $client, forgeDatabaseProject(), new stdClass);
 })->with([[[]], [['main' => 'DB', 'analytics' => 'DB']], [['main' => 'DB', 'analytics' => "BAD\nKEY"]]])->throws(InvalidArgumentException::class);
 
-it('requires exact-scope consent before reusing an unmarked Forge database', function (string $content, bool $consent, bool $valid): void {
+it('requires exact-scope consent before reusing an unmarked Forge database', function (string $content, bool $consent, bool $valid, ?string $legacyHost = null, string $declaredUsername = 'api'): void {
     $client = $this->createMock(ForgeCapabilitiesClientInterface::class);
     $client->method('serverDatabaseType')->willReturn('mysql84');
     $client->expects($this->once())->method('databases')->willReturn([['name' => 'main']]);
@@ -55,11 +56,13 @@ it('requires exact-scope consent before reusing an unmarked Forge database', fun
     if ($consent && $valid) $client->expects($this->once())->method('updateEnvironment')->with('7', '55', $this->anything())->willReturnCallback(function ($server, $site, $values) use (&$stored): void { $stored .= "\n".implode("\n", array_map(static fn ($key, $value) => $key.'='.$value, array_keys($values), $values)); });
     else $client->expects($this->never())->method('updateEnvironment');
     $client->expects($this->never())->method('createDatabase');
-    $project = new class {
+    $project = new class($declaredUsername) {
+        public function __construct(private string $username) {}
         public function name(): string { return 'api'; }
-        public function databases(): array { return [new class {
+        public function databases(): array { return [new class($this->username) {
+            public function __construct(private string $username) {}
             public function name(): string { return 'main'; }
-            public function user(): string { return 'api'; }
+            public function user(): string { return $this->username; }
         }]; }
     };
     $profile = new class($consent) {
@@ -67,7 +70,7 @@ it('requires exact-scope consent before reusing an unmarked Forge database', fun
         public function name(): string { return 'production'; }
         public function get(string $key): mixed { return $key === 'forge' && $this->consent ? ['adopt_existing_databases' => [['project' => 'api', 'profile' => 'production', 'name' => 'main']]] : null; }
     };
-    $provider = new ForgeProvider(['server_id' => 7]);
+    $provider = new ForgeProvider(['server_id' => 7, 'database_host' => $legacyHost]);
     $failure = null;
     try {
         (new ReflectionMethod($provider, 'applyDatabases'))->invoke($provider, $client, $project, $profile, '55');
@@ -75,8 +78,21 @@ it('requires exact-scope consent before reusing an unmarked Forge database', fun
     expect($failure === null)->toBe($valid)
         ->and($consent && $valid ? $stored : '')->toContain($consent && $valid ? 'adopted:' : '');
     if ($failure !== null) expect($failure->getMessage())->not->toContain('retained-secret');
-    expect((new ReflectionProperty($provider, 'generatedEnvironment'))->getValue($provider))->toBe($consent && $valid ? ['SHIPPERCLI_DATABASE_'.strtoupper(substr(hash('sha256', 'main'), 0, 24)) => 'adopted:'.hash('sha256', json_encode(['api', 'production', 'main'], JSON_THROW_ON_ERROR))] : []);
+    $expectedEnvironment = [];
+    if ($consent && $valid) {
+        if ($legacyHost !== null) {
+            $expectedEnvironment['DB_HOST'] = $legacyHost;
+        }
+        $key = 'SHIPPERCLI_DATABASE_'.strtoupper(substr(hash('sha256', 'main'), 0, 24));
+        $expectedEnvironment[$key] = 'adopted:'.hash('sha256', json_encode(['api', 'production', 'main'], JSON_THROW_ON_ERROR));
+    }
+    expect((new ReflectionProperty($provider, 'generatedEnvironment'))->getValue($provider))->toBe($expectedEnvironment);
 })->with([
+    ["DB_HOST=127.0.0.1\nDB_DATABASE=main\nDB_USERNAME='\${PROJECT_NAME}_db'\nDB_PASSWORD=retained-secret", true, true, null, '${PROJECT_NAME}_db'],
+    ["DB_HOST=127.0.0.1\nDB_DATABASE=main\nDB_USERNAME='\${PROJECT_NAME}_db'\nDB_PASSWORD=retained-secret", false, false, null, '${PROJECT_NAME}_db'],
+    ["DB_DATABASE=main\nDB_USERNAME=api\nDB_PASSWORD=retained-secret", true, true, 'legacy-db.internal'],
+    ["DB_DATABASE=main\nDB_USERNAME=api\nDB_PASSWORD=retained-secret", false, false, 'legacy-db.internal'],
+    ["DB_DATABASE=main\nDB_USERNAME=api\nDB_PASSWORD=retained-secret", true, false],
     ["DB_HOST=127.0.0.1\nDB_DATABASE=main\nDB_USERNAME=api\nDB_PASSWORD='retained-secret'", false, false],
     ["DB_HOST=127.0.0.1\nDB_DATABASE=main\nDB_USERNAME=api\nDB_PASSWORD='retained-secret'", true, true],
     ["DB_HOST=127.0.0.1\nDB_DATABASE=main\nDB_USERNAME=api", true, false],
@@ -256,10 +272,10 @@ it('delivers a confirmed Forge connection before provisioning later databases', 
         $password = $payload['password'];
         return ['id' => 21, 'name' => 'main'];
     });
-    $client->expects($this->once())->method('updateEnvironment')->with('7', '55', $this->anything())
+    $client->expects($this->exactly(3))->method('updateEnvironment')->with('7', '55', $this->anything())
         ->willReturnCallback(function ($server, $site, $values) use (&$events, &$persisted): void {
-            $events[] = 'deliver';
-            $persisted = $values;
+            $events[] = isset($values['DB_DATABASE']) ? 'deliver' : 'prepare';
+            $persisted = [...$persisted, ...$values];
         });
     $provider = new ForgeProvider(['server_id' => 7, 'database_environment_prefixes' => ['main' => 'DB', 'analytics' => 'ANALYTICS_DB']]);
     $failure = null;
@@ -267,7 +283,7 @@ it('delivers a confirmed Forge connection before provisioning later databases', 
         (new ReflectionMethod($provider, 'applyDatabases'))->invoke($provider, $client, forgeDatabaseProject(), new stdClass, '55');
     } catch (RuntimeException $error) { $failure = $error; }
     expect($failure?->getMessage())->toBe('Synthetic second database failure')
-        ->and($events)->toBe(['create:main', 'deliver', 'create:analytics'])
+        ->and($events)->toBe(['prepare', 'create:main', 'deliver', 'prepare', 'create:analytics'])
         ->and($persisted['DB_PASSWORD'] ?? null)->toBe($password)
         ->and($persisted['DB_DATABASE'] ?? null)->toBe('main')
         ->and($persisted)->not->toHaveKey('ANALYTICS_DB_PASSWORD');
@@ -276,14 +292,14 @@ it('delivers a confirmed Forge connection before provisioning later databases', 
     $retry->method('databases')->willReturn([['id' => 21, 'name' => 'main']]);
     $ownershipKey = 'SHIPPERCLI_DATABASE_'.strtoupper(substr(hash('sha256', 'main'), 0, 24));
     $ownershipMarker = hash('sha256', json_encode(['api', 'production', 'main'], JSON_THROW_ON_ERROR));
-    $retry->expects($this->once())->method('environment')->with('7', '55')->willReturn(
+    $retry->expects($this->exactly(2))->method('environment')->with('7', '55')->willReturn(
         "DB_HOST=127.0.0.1\nDB_DATABASE=main\nDB_USERNAME=api_production_main\nDB_PASSWORD=".$password."\n".$ownershipKey.'=created:'.$ownershipMarker,
     );
     $retry->expects($this->once())->method('createDatabase')->willReturnCallback(function ($server, $payload): array {
         expect($payload['name'])->toBe('analytics');
         return ['id' => 22, 'name' => 'analytics'];
     });
-    $retry->expects($this->once())->method('updateEnvironment')->willReturnCallback(function ($server, $site, $values) use (&$persisted): void {
+    $retry->expects($this->exactly(2))->method('updateEnvironment')->willReturnCallback(function ($server, $site, $values) use (&$persisted): void {
         $persisted = [...$persisted, ...$values];
     });
     $retryProvider = new ForgeProvider(['server_id' => 7, 'database_environment_prefixes' => ['main' => 'DB', 'analytics' => 'ANALYTICS_DB']]);
@@ -295,13 +311,68 @@ it('delivers a confirmed Forge connection before provisioning later databases', 
     expect($persisted['DB_PASSWORD'])->toBe($password)->and($persisted['ANALYTICS_DB_DATABASE'])->toBe('analytics');
 });
 
-it('stops further Forge database creation when connection delivery fails', function (): void {
+it('does not create a Forge database when saving the pending password fails', function (): void {
     $client = $this->createMock(ForgeCapabilitiesClientInterface::class);
     $client->method('serverDatabaseType')->willReturn('mysql84');
     $client->method('databases')->willReturn([]);
-    $client->expects($this->once())->method('createDatabase')->willReturn(['id' => 21, 'name' => 'main']);
+    $client->expects($this->never())->method('createDatabase');
     $client->expects($this->once())->method('updateEnvironment')->willThrowException(new RuntimeException('Synthetic delivery failure'));
     $provider = new ForgeProvider(['server_id' => 7, 'database_environment_prefixes' => ['main' => 'DB', 'analytics' => 'ANALYTICS_DB']]);
     expect(fn () => (new ReflectionMethod($provider, 'applyDatabases'))->invoke($provider, $client, forgeDatabaseProject(), new stdClass, '55'))
         ->toThrow(RuntimeException::class, 'Synthetic delivery failure');
+});
+
+it('recovers the same Forge password after creation succeeds and the final write fails', function (): void {
+    $client = $this->createMock(ForgeCapabilitiesClientInterface::class);
+    $client->method('serverDatabaseType')->willReturn('mysql84');
+    $inventory = [];
+    $stored = [];
+    $createdPassword = null;
+    $writes = 0;
+    $client->method('databases')->willReturnCallback(function () use (&$inventory): array {
+        return $inventory;
+    });
+    $client->method('environment')->willReturnCallback(function () use (&$stored): string {
+        return implode("\n", array_map(static fn ($key, $value) => $key.'="'.$value.'"', array_keys($stored), $stored));
+    });
+    $client->expects($this->once())->method('createDatabase')->willReturnCallback(
+        function ($server, $payload) use (&$inventory, &$createdPassword, &$stored): array {
+            $createdPassword = $payload['password'];
+            expect(array_values($stored))->toBe([$createdPassword]);
+            return $inventory[] = ['id' => 21, 'name' => 'main'];
+        },
+    );
+    $client->expects($this->exactly(3))->method('updateEnvironment')->willReturnCallback(
+        function ($server, $site, $values) use (&$stored, &$writes): void {
+            if (++$writes === 2) {
+                throw new RuntimeException('Synthetic final write failure');
+            }
+            $stored = [...$stored, ...$values];
+        },
+    );
+
+    $project = forgeDatabaseProject(['main']);
+    $profile = new class {
+        public bool $adopt = false;
+        public function name(): string { return 'production'; }
+        public function get(string $key): mixed {
+            return $key === 'forge' && $this->adopt
+                ? ['adopt_existing_databases' => [['project' => 'api', 'profile' => 'production', 'name' => 'main']]]
+                : null;
+        }
+    };
+    $apply = function () use ($client, $project, $profile): void {
+        $provider = new ForgeProvider(['server_id' => 7]);
+        (new ReflectionMethod($provider, 'applyDatabases'))->invoke($provider, $client, $project, $profile, '55');
+    };
+
+    expect($apply)->toThrow(RuntimeException::class, 'Synthetic final write failure');
+    $pendingKey = array_key_first($stored);
+    expect($pendingKey)->toStartWith('SHIPPERCLI_DB_PENDING_');
+    expect($apply)->toThrow(RuntimeException::class);
+    $profile->adopt = true;
+    $apply();
+    expect($stored['DB_PASSWORD'])->toBe($createdPassword)
+        ->and($stored[$pendingKey])->toBe('')
+        ->and($stored['DB_USERNAME'])->toBe('api_production_main');
 });

@@ -80,6 +80,12 @@ an independent generated password unless a password is configured. An applicatio
 `<PREFIX>_PASSWORD` (such as `DB_PASSWORD`) takes precedence over the provider-wide
 `database_password` fallback; profile application values override project values.
 The selected password is sent unchanged to creation and application delivery.
+Apply verifies that the selected password is saved in the Forge site environment
+before creating the database. If creation succeeded but delivery of the connection
+settings failed, verify the database identity and credentials in Forge and add the
+exact-scope adoption entry below. Apply can recover the pending password without
+rotating it or creating the database again. Keep the same connection settings
+during recovery. Run only one apply at a time for each Forge site.
 Explicit per-database passwords must be nonempty strings; invalid values fail
 before provisioning. Database names, users and hosts remain declaration/provider
 controlled.
@@ -100,6 +106,15 @@ forge:
       profile: production
       name: api_production
 ```
+
+For a legacy database with matching name, user and password but no host
+variable, explicitly set the verified `database_host` in the provider config
+and opt in to adoption. Apply saves that host along with the adoption marker.
+A host already present in the application environment is preserved. If an older
+version created the database user with the literal username from the declaration
+before interpolation was supported, verify that literal username in Forge.
+Exact-scope adoption can retain that username when it matches the stored
+connection settings.
 
 The read-only plan names each adoption. The marker is persisted in the site
 environment after apply confirms the existing database credentials. Forge does
