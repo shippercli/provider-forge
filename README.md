@@ -28,7 +28,7 @@ If the deployment workspace has no `composer.json`, run
 
 ```bash
 composer config repositories.shipper-forge git https://github.com/shippercli/provider-forge.git
-composer require 'shippercli/cli:^1.0.5' 'shippercli/provider-forge:dev-main'
+composer require 'shippercli/cli:^1.0.5' 'shippercli/provider-forge:^1.0'
 vendor/bin/shipper --version
 ```
 
