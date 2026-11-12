@@ -16,6 +16,7 @@ class ResponsesTest(unittest.TestCase):
         deployment_polls = {}
         partial = {'databases': [], 'environment': 'APP_ENV=production\n', 'analytics_attempts': 0}
         partial_events = []
+        analytics_passwords = []
 
         class Handler(http.server.BaseHTTPRequestHandler):
             def log_message(self, *_args):
@@ -77,7 +78,11 @@ class ResponsesTest(unittest.TestCase):
                     elif path.endswith('/environment'):
                         if self.command == 'PUT':
                             partial['environment'] = json.loads(body)['environment']
-                            partial_events.append('deliver')
+                            event = 'prepare' if any(
+                                line.startswith('SHIPPERCLI_DB_PENDING_') and not line.endswith('=')
+                                for line in partial['environment'].splitlines()
+                            ) else 'deliver'
+                            partial_events.append(event)
                             envelope = {}
                         else:
                             envelope = {'data': {'attributes': {'content': partial['environment']}}}
@@ -85,7 +90,9 @@ class ResponsesTest(unittest.TestCase):
                         request = json.loads(body)
                         name = request['name']
                         partial_events.append('create:' + name)
-                        if name == 'analytics': partial['analytics_attempts'] += 1
+                        if name == 'analytics':
+                            partial['analytics_attempts'] += 1
+                            analytics_passwords.append(request['password'])
                         if name == 'analytics' and partial['analytics_attempts'] == 1:
                             status, envelope = 500, {'message': 'synthetic second creation failure'}
                         else:
@@ -197,7 +204,12 @@ class ResponsesTest(unittest.TestCase):
                 result = subprocess.run(['php', str(Path(__file__).with_name('verify-responses.php')), f'http://127.0.0.1:{server.server_port}'], capture_output=True, text=True, timeout=15)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertEqual(redirected, [])
-                self.assertEqual(partial_events, ['create:main', 'deliver', 'create:analytics', 'create:analytics', 'deliver'])
+                self.assertEqual(partial_events, [
+                    'prepare', 'create:main', 'deliver', 'prepare', 'create:analytics',
+                    'create:analytics', 'deliver',
+                ])
+                self.assertEqual(len(analytics_passwords), 2)
+                self.assertEqual(analytics_passwords[0], analytics_passwords[1])
                 for variant in ['valid', 'valid-explicit', 'foreign', 'missing-name']:
                     scoped = [(path, body) for path, _, body in received if '/orgs/' + variant + '/' in path]
                     self.assertEqual(len(scoped), 4)
@@ -206,7 +218,7 @@ class ResponsesTest(unittest.TestCase):
                     self.assertTrue(scoped[2][0].endswith('/database/schemas'))
                     self.assertTrue(scoped[3][0].endswith('/database/schemas/21'))
                     self.assertEqual(json.loads(scoped[2][1])['password'], 'literal-${PROJECT_NAME}-${PROFILE}-+%:@' if variant == 'valid-explicit' else 'synthetic-database-secret')
-                self.assertEqual(len(received), 284)
+                self.assertEqual(len(received), 293)
                 for variant in ['engine-mismatch', 'engine-unknown']:
                     scoped = [(path, body) for path, _, body in received if '/orgs/' + variant + '/' in path]
                     self.assertEqual(len(scoped), 1)
