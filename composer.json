@@ -6,7 +6,8 @@
     "require": {
         "php": "^8.3",
         "laravel/forge-sdk": "^4.0",
-        "shippercli/contracts": "^1.2"
+        "shippercli/contracts": "^1.2",
+        "vlucas/phpdotenv": "^5.6"
     },
     "autoload": {
         "psr-4": {
@@ -36,5 +37,20 @@
         "platform": {
             "php": "8.3.0"
         }
+    },
+    "archive": {
+        "exclude": [
+            "vendor",
+            "node_modules",
+            "tests",
+            ".github",
+            ".env*",
+            "auth.json",
+            "builds",
+            "box.phar",
+            ".phpunit*",
+            "phpunit.xml*",
+            ".phpstan*"
+        ]
     }
 }

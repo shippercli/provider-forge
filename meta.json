@@ -18,7 +18,9 @@
   "config": {
     "provider": "forge",
     "api_token": "${FORGE_API_TOKEN}",
-    "server_id": 1337
+    "organization_slug": "${FORGE_ORGANIZATION_SLUG}",
+    "server_id": 1337,
+    "deployment_timeout": 300
   },
   "install": "composer require shippercli/provider-forge"
 }

@@ -27,7 +27,7 @@ it('creates and deploys a site through the client', function () {
     $client = new class implements \ShipperCli\ProviderForge\ForgeClientInterface {
         public array $calls = [];
         public function sites(string $serverId): array { $this->calls[] = ['sites', $serverId]; return []; }
-        public function createSite(string $serverId, array $payload): array { $this->calls[] = ['createSite', $serverId, $payload]; return ['id' => 12, 'name' => 'example.test', 'tags' => ['shipper-managed']]; }
+        public function createSite(string $serverId, array $payload): array { $this->calls[] = ['createSite', $serverId, $payload]; return ['id' => 12, 'name' => 'example.test', 'tags' => ['shipper-managed-'.substr(hash('sha256', json_encode(['project', 'profile'], JSON_THROW_ON_ERROR)), 0, 20)]]; }
         public function deploy(string $serverId, string $siteId): void { $this->calls[] = ['deploy', $serverId, $siteId]; }
         public function deleteSite(string $serverId, string $siteId): void { $this->calls[] = ['deleteSite', $serverId, $siteId]; }
     };
@@ -37,7 +37,7 @@ it('creates and deploys a site through the client', function () {
 
     expect($provider->apply($project, $profile))->toBeTrue()
         ->and($client->calls[1][0])->toBe('createSite')
-        ->and($client->calls[1][2]['tags'])->toBe(['shipper-managed'])
+        ->and($client->calls[1][2]['tags'])->toBe(['shipper-managed-'.substr(hash('sha256', json_encode(['project', 'profile'], JSON_THROW_ON_ERROR)), 0, 20)])
         ->and($client->calls[2][0])->toBe('deploy');
 });
 
@@ -60,7 +60,7 @@ it('lists only owned sites for orphaned preview cleanup', function () {
         public function sites(string $serverId): array
         {
             return [
-                ['id' => 12, 'name' => 'preview-owned.test', 'tags' => ['shipper-managed']],
+                ['id' => 12, 'name' => 'preview-owned.test', 'tags' => ['shipper-managed-'.substr(hash('sha256', json_encode(['project', 'profile'], JSON_THROW_ON_ERROR)), 0, 20)]],
                 ['id' => 13, 'name' => 'production.test', 'tags' => []],
             ];
         }
@@ -82,7 +82,7 @@ it('deletes only an owned site through orphaned preview cleanup', function () {
 
         public function sites(string $serverId): array
         {
-            return [['id' => 12, 'name' => 'preview-owned.test', 'tags' => ['shipper-managed']]];
+            return [['id' => 12, 'name' => 'preview-owned.test', 'tags' => ['shipper-managed-'.substr(hash('sha256', json_encode(['project', 'profile'], JSON_THROW_ON_ERROR)), 0, 20)]]];
         }
 
         public function createSite(string $serverId, array $payload): array { return []; }
@@ -100,12 +100,14 @@ it('applies configured Forge capabilities through the extended client', function
         public array $calls = [];
 
         public function sites(string $serverId): array { return []; }
-        public function createSite(string $serverId, array $payload): array { return ['id' => 12, 'name' => 'example.test', 'tags' => ['shipper-managed']]; }
+        public function createSite(string $serverId, array $payload): array { return ['id' => 12, 'name' => 'example.test', 'tags' => ['shipper-managed-'.substr(hash('sha256', json_encode(['project', 'profile'], JSON_THROW_ON_ERROR)), 0, 20)]]; }
         public function deploy(string $serverId, string $siteId): void { $this->calls[] = ['deploy']; }
         public function deleteSite(string $serverId, string $siteId): void {}
+        public function serverDatabaseType(string $serverId): string { return 'mysql84'; }
         public function databases(string $serverId): array { return []; }
         public function createDatabase(string $serverId, array $payload): array { $this->calls[] = ['database', $payload]; return ['id' => 20, 'name' => $payload['name']]; }
         public function deleteDatabase(string $serverId, string $databaseId): void {}
+        public function environment(string $serverId, string $siteId): string { return ''; }
         public function updateEnvironment(string $serverId, string $siteId, array $variables): void { $this->calls[] = ['environment', $variables]; }
         public function domains(string $serverId, string $siteId): array { return [['id' => 30, 'name' => 'example.test']]; }
         public function createDomain(string $serverId, string $siteId, array $payload): array { return ['id' => 30, 'name' => $payload['name']]; }
@@ -156,3 +158,42 @@ it('applies configured Forge capabilities through the extended client', function
     expect($provider->apply($project, $profile))->toBeTrue()
         ->and(array_column($client->calls, 0))->toContain('database', 'environment', 'worker', 'cron', 'certificate', 'deploy');
 });
+
+it('refuses generic or differently scoped ownership tags across mutation paths', function (string $tag): void {
+    $client = $this->createMock(\ShipperCli\ProviderForge\ForgeClientInterface::class);
+    $client->method('sites')->willReturn([['id' => 12, 'name' => 'example.test', 'tags' => [$tag]]]);
+    $client->expects($this->never())->method('createSite');
+    $client->expects($this->never())->method('deploy');
+    $client->expects($this->never())->method('deleteSite');
+    $provider = new ForgeProvider(['api_token' => 'token', 'server_id' => 7, 'organization_slug' => 'shipper'], $client);
+    $project = new class { public function name(): string { return 'api'; } };
+    $profile = new class {
+        public function name(): string { return 'production'; }
+        public function get(string $key): mixed { return $key === 'domain' ? 'example.test' : null; }
+    };
+    expect($provider->apply($project, $profile))->toBeFalse()
+        ->and($provider->destroy($project, $profile))->toBeFalse()
+        ->and($provider->deleteSiteWithDatabases($project, $profile, 12))->toBeFalse()
+        ->and($provider->listSites($project, $profile))->toBe([]);
+})->with([
+    'shipper-managed',
+    'shipper-managed-'.substr(hash('sha256', json_encode(['other', 'production'], JSON_THROW_ON_ERROR)), 0, 20),
+    'shipper-managed-'.substr(hash('sha256', json_encode(['api', 'preview'], JSON_THROW_ON_ERROR)), 0, 20),
+]);
+
+it('checks the created site domain before deploying', function (mixed $name, bool $valid): void {
+    $client = new class($name) implements \ShipperCli\ProviderForge\ForgeClientInterface {
+        public int $deploys = 0;
+        public function __construct(private mixed $name) {}
+        public function sites(string $serverId): array { return []; }
+        public function createSite(string $serverId, array $payload): array { return ['id' => 12, 'name' => $this->name]; }
+        public function deploy(string $serverId, string $siteId): void { $this->deploys++; }
+        public function deleteSite(string $serverId, string $siteId): void { throw new LogicException('Unexpected delete'); }
+    };
+    $provider = new ForgeProvider(['api_token' => 'token', 'server_id' => 7, 'organization_slug' => 'shipper'], $client);
+    $project = new class { public function get(string $key): mixed { return $key === 'repository' ? 'shippercli/example' : null; } };
+    $profile = new class { public function get(string $key): mixed { return ['domain' => 'example.test', 'branch' => 'main'][$key] ?? null; } };
+    expect($provider->apply($project, $profile))->toBe($valid)->and($client->deploys)->toBe($valid ? 1 : 0);
+    if ($valid) expect($provider->getLastError())->toBe('');
+    else expect($provider->getLastError())->toContain('requested domain');
+})->with([['other.test', false], [' example.test', false], ['example.test ', false], ['', false], [null, false], ['EXAMPLE.test', true]]);
