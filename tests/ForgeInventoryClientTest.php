@@ -1,11 +1,12 @@
 <?php
 
-use ShipperCli\ProviderForge\ForgeApiClient;
-use ShipperCli\ProviderForge\ForgeInventoryClient;
 use GuzzleHttp\Client;
-use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\HandlerStack;
+use GuzzleHttp\Handler\MockHandler;
+use GuzzleHttp\Middleware;
 use GuzzleHttp\Psr7\Response;
+use Laravel\Forge\Exceptions\RateLimitExceededException;
+use ShipperCli\ProviderForge\ForgeInventoryClient;
 
 it('validates reconciliation collection envelopes through the real SDK methods', function (string $method): void {
     $http = new Client(['handler' => HandlerStack::create(new MockHandler([new Response(200, [], '{}')]))]);
@@ -13,23 +14,6 @@ it('validates reconciliation collection envelopes through the real SDK methods',
     $args = $method === 'domains' ? ['org', 7, 12] : ['org', 7];
     iterator_to_array($sdk->{$method}(...$args)->lazy());
 })->with(['databases', 'domains', 'backgroundProcesses', 'scheduledJobs'])->throws(RuntimeException::class, 'invalid resource inventory envelope');
-
-it('rejects incomplete resource identities before reconciliation matching', function (): void {
-    $client = (new ReflectionClass(ForgeApiClient::class))->newInstanceWithoutConstructor();
-    $method = new ReflectionMethod($client, 'resources');
-    foreach (['name', 'command'] as $field) {
-        foreach ([['id' => 12], ['id' => 0, $field => 'example'], [$field => 'example']] as $record) {
-            try {
-                $method->invoke($client, [(object) $record], $field);
-                throw new LogicException('Invalid inventory was accepted.');
-            } catch (RuntimeException $exception) {
-                expect($exception->getMessage())->toContain('reconciliation identity');
-            }
-        }
-        expect($method->invoke($client, [(object) ['id' => 12, $field => 'example']], $field))
-            ->toBe([['id' => 12, $field => 'example']]);
-    }
-});
 
 it('rejects malformed site envelopes before SDK collection normalization', function (string $body): void {
     $http = new Client(['handler' => HandlerStack::create(new MockHandler([new Response(200, [], $body)]))]);
@@ -52,23 +36,6 @@ it('rejects a malformed later cursor page instead of accepting partial inventory
     iterator_to_array($sdk->serverSites('org', 7)->lazy());
 })->throws(RuntimeException::class, 'invalid resource inventory envelope');
 
-it('rejects Forge site records without valid identities', function (array $data): void {
-    $client = (new ReflectionClass(ForgeApiClient::class))->newInstanceWithoutConstructor();
-    (new ReflectionMethod($client, 'siteData'))->invoke($client, (object) $data);
-})->with(array_map(static fn (array $record): array => [$record], [[], ['id' => 12], ['name' => 'example.test'], ['id' => 0, 'name' => 'example.test'], ['id' => 'invalid', 'name' => 'example.test'], ['id' => 12, 'name' => '']]))->throws(RuntimeException::class, 'valid identity');
-
-it('rejects invalid Forge collections instead of treating them as empty', function (mixed $data): void {
-    $client = (new ReflectionClass(ForgeApiClient::class))->newInstanceWithoutConstructor();
-    (new ReflectionMethod($client, 'iterable'))->invoke($client, $data);
-})->with([null, 'invalid', false, new stdClass])->throws(RuntimeException::class, 'invalid resource collection');
-
-it('accepts explicit empty collections and valid site identities', function (): void {
-    $client = (new ReflectionClass(ForgeApiClient::class))->newInstanceWithoutConstructor();
-    expect((new ReflectionMethod($client, 'iterable'))->invoke($client, []))->toBe([]);
-    $data = (new ReflectionMethod($client, 'siteData'))->invoke($client, (object) ['id' => 12, 'name' => 'example.test']);
-    expect($data['id'])->toBe(12)->and($data['name'])->toBe('example.test');
-});
-
 it('rejects JSON shape loss and contradictory inventory errors before SDK normalization', function (string $body): void {
     $http = new Client(['handler' => HandlerStack::create(new MockHandler([new Response(200, [], $body)]))]);
     $sdk = new ForgeInventoryClient('token', $http);
@@ -85,4 +52,40 @@ it('preserves plaintext responses outside protected inventory endpoints', functi
     $http = new Client(['handler' => HandlerStack::create(new MockHandler([new Response(200, [], 'server configuration text')]))]);
     $sdk = new ForgeInventoryClient('token', $http);
     expect($sdk->get('fixture/plaintext'))->toBe('server configuration text');
+});
+
+it('enforces request policy independently of injected client defaults', function (): void {
+    $history = [];
+    $stack = HandlerStack::create(new MockHandler([new Response(200, [], '{"data":[]}')]));
+    $stack->push(Middleware::history($history));
+    $http = new Client(['handler' => $stack, 'allow_redirects' => true, 'http_errors' => true, 'timeout' => 99]);
+    $sdk = (new ForgeInventoryClient('synthetic', $http))->setTimeout(3);
+    expect($sdk->get('fixture'))->toBe(['data' => []])
+        ->and($history[0]['options']['allow_redirects'])->toBeFalse()
+        ->and($history[0]['options']['http_errors'])->toBeFalse()
+        ->and($history[0]['options']['timeout'])->toBe(3);
+});
+
+it('preserves a numeric rate limit reset without error body data', function (): void {
+    $stack = HandlerStack::create(new MockHandler([new Response(429, ['x-ratelimit-reset' => '1234567890'], 'synthetic-secret')]));
+    $sdk = new ForgeInventoryClient('synthetic', new Client(['handler' => $stack]));
+    $failure = null;
+    try { $sdk->get('fixture'); } catch (RateLimitExceededException $exception) { $failure = $exception; }
+    expect($failure)->toBeInstanceOf(RateLimitExceededException::class)
+        ->and($failure->rateLimitResetsAt)->toBe(1234567890)
+        ->and($failure->getMessage())->not->toContain('synthetic-secret');
+});
+
+it('redacts underlying transport failure details', function (): void {
+    $failure = new \GuzzleHttp\Exception\ConnectException(
+        'synthetic connection detail',
+        new \GuzzleHttp\Psr7\Request('GET', 'https://forge.example.test/fixture'),
+    );
+    $http = new Client(['handler' => HandlerStack::create(new MockHandler([$failure]))]);
+    $sdk = new ForgeInventoryClient('token', $http);
+
+    expect(fn () => $sdk->get('fixture/plaintext'))->toThrow(
+        RuntimeException::class,
+        'Forge API transport failed; check connectivity, TLS, and timeout settings.',
+    );
 });

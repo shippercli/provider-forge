@@ -15,6 +15,4 @@ structure:
     paths:
       source: src
       test: tests
-    file_map:
-      ForgeInventoryClient.php: InventoryValidationTest.php
     rules: []
