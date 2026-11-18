@@ -299,3 +299,5 @@ it does not mean completion. Timestamp/shape checks follow the current
 Consumers depending on arbitrary status resource fields must stop doing so.
 Explicit log/output methods are unchanged and may return sensitive application
 output; this status boundary does not sanitize third-party client implementations.
+
+[![advertisement](https://ads.servead.net/i/81c884ee-ddd8-4132-af45-ebd53f9769fc.svg)](https://ads.servead.net/c/81c884ee-ddd8-4132-af45-ebd53f9769fc)
