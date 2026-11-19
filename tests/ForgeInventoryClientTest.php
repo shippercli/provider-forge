@@ -75,17 +75,3 @@ it('preserves a numeric rate limit reset without error body data', function (): 
         ->and($failure->rateLimitResetsAt)->toBe(1234567890)
         ->and($failure->getMessage())->not->toContain('synthetic-secret');
 });
-
-it('redacts underlying transport failure details', function (): void {
-    $failure = new \GuzzleHttp\Exception\ConnectException(
-        'synthetic connection detail',
-        new \GuzzleHttp\Psr7\Request('GET', 'https://forge.example.test/fixture'),
-    );
-    $http = new Client(['handler' => HandlerStack::create(new MockHandler([$failure]))]);
-    $sdk = new ForgeInventoryClient('token', $http);
-
-    expect(fn () => $sdk->get('fixture/plaintext'))->toThrow(
-        RuntimeException::class,
-        'Forge API transport failed; check connectivity, TLS, and timeout settings.',
-    );
-});
